@@ -1,0 +1,5 @@
+{
+  "name": "Simulador Resultados Brasileirão",
+  "description": "Professional football match and league simulator using Dixon-Coles model with Monte Carlo methods.",
+  "requestFramePermissions": []
+}
