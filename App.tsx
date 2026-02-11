@@ -37,7 +37,7 @@ const SIMULATION_COUNT = 10000;
 const LEAGUE_SIM_COUNT = 10000; 
 const EPOCHS = 100; 
 const LEARNING_RATE = 0.012; 
-const XI_CANDIDATES = [0.0015, 0.0020, 0.0025, 0.0030]; 
+const XI_CANDIDATES = [0.000, 0.0005, 0.0010, 0.0015, 0.0020, 0.0025, 0.0030]; 
 
 const UI_SCALE_FACTOR = 8; 
 
@@ -47,12 +47,8 @@ const UI_SCALE_FACTOR = 8;
 const simulatePoisson = (lambda) => {
   const safeLambda = Math.max(0.01, lambda);
   let L = Math.exp(-safeLambda);
-  let k = 0;
-  let p = 1;
-  do {
-    k++;
-    p *= Math.random();
-  } while (p > L && k < 15);
+  let k = 0, p = 1;
+  do { k++; p *= Math.random(); } while (p > L && k < 15);
   return k - 1;
 };
 
@@ -72,10 +68,7 @@ const calculateRPS = (probs, outcome) => {
     let sum = 0;
     for (let i = 0; i < 2; i++) {
         let cumP = 0, cumE = 0;
-        for (let j = 0; j <= i; j++) {
-            cumP += p[j];
-            cumE += e[j];
-        }
+        for (let j = 0; j <= i; j++) { cumP += p[j]; cumE += e[j]; }
         sum += Math.pow(cumP - cumE, 2);
     }
     return sum / 2;
@@ -97,30 +90,17 @@ const runMonteCarlo = (homeTeam, awayTeam, globalHfa, rho, iterations) => {
   for (let i = 1; i <= iterations; i++) {
     let hG = simulatePoisson(lambdaH);
     let aG = simulatePoisson(lambdaA);
-
     if (hG <= 1 && aG <= 1) {
       const probAdj = tauCorrection(hG, aG, lambdaH, lambdaA, rho);
-      if (Math.random() > probAdj) {
-        hG = simulatePoisson(lambdaH);
-        aG = simulatePoisson(lambdaA);
-      }
+      if (Math.random() > probAdj) { hG = simulatePoisson(lambdaH); aG = simulatePoisson(lambdaA); }
     }
-
-    const cH = Math.min(hG, 5);
-    const cA = Math.min(aG, 5);
+    const cH = Math.min(hG, 5), cA = Math.min(aG, 5);
     scoreMatrix[cH][cA]++;
-
-    if (hG > aG) homeWins++;
-    else if (aG > hG) awayWins++;
-    else draws++;
+    if (hG > aG) homeWins++; else if (aG > hG) awayWins++; else draws++;
   }
 
   return {
-    probs: {
-      home: (homeWins / iterations) * 100,
-      draw: (draws / iterations) * 100,
-      away: (awayWins / iterations) * 100
-    },
+    probs: { home: (homeWins / iterations) * 100, draw: (draws / iterations) * 100, away: (awayWins / iterations) * 100 },
     matrix: scoreMatrix.map(row => row.map(count => (count / iterations) * 100)),
     expectedGoals: { home: lambdaH, away: lambdaA },
     expectedPointsHome: (homeWins * 3 + draws * 1) / iterations,
@@ -129,24 +109,14 @@ const runMonteCarlo = (homeTeam, awayTeam, globalHfa, rho, iterations) => {
 };
 
 const simulateMatchResult = (homeTeam, awayTeam, globalHfa, rho) => {
-  const attH = (homeTeam?.attack || 0) / UI_SCALE_FACTOR;
-  const defH = (homeTeam?.defense || 0) / UI_SCALE_FACTOR;
-  const attA = (awayTeam?.attack || 0) / UI_SCALE_FACTOR;
-  const defA = (awayTeam?.defense || 0) / UI_SCALE_FACTOR;
+  const attH = (homeTeam?.attack || 0) / UI_SCALE_FACTOR, defH = (homeTeam?.defense || 0) / UI_SCALE_FACTOR;
+  const attA = (awayTeam?.attack || 0) / UI_SCALE_FACTOR, defA = (awayTeam?.defense || 0) / UI_SCALE_FACTOR;
   const hfa_eff = ((globalHfa + (homeTeam?.hfa_raw || 0)) / 2);
-
-  const lambdaH = Math.exp(attH + defA + hfa_eff);
-  const lambdaA = Math.exp(attA + defH);
-  
-  let hG = simulatePoisson(lambdaH);
-  let aG = simulatePoisson(lambdaA);
-
+  const lambdaH = Math.exp(attH + defA + hfa_eff), lambdaA = Math.exp(attA + defH);
+  let hG = simulatePoisson(lambdaH), aG = simulatePoisson(lambdaA);
   if (hG <= 1 && aG <= 1) {
     const probAdj = tauCorrection(hG, aG, lambdaH, lambdaA, rho);
-    if (Math.random() > probAdj) {
-      hG = simulatePoisson(lambdaH);
-      aG = simulatePoisson(lambdaA);
-    }
+    if (Math.random() > probAdj) { hG = simulatePoisson(lambdaH); aG = simulatePoisson(lambdaA); }
   }
   return { hG, aG };
 };
@@ -173,11 +143,6 @@ export default function App() {
   const [isSimulatingRound, setIsSimulatingRound] = useState(false);
   const [modelAccuracy, setModelAccuracy] = useState(null);
 
-  const getInsensitive = (obj, key) => {
-    const foundKey = Object.keys(obj).find(k => k.toLowerCase() === key.toLowerCase());
-    return foundKey ? obj[foundKey] : undefined;
-  };
-
   const parseCSV = (text) => {
     if (!text) return [];
     const delimiter = text.includes(';') ? ';' : ',';
@@ -195,43 +160,42 @@ export default function App() {
     });
   };
 
+  const getInsensitive = (obj, key) => {
+    const foundKey = Object.keys(obj).find(k => k.toLowerCase() === key.toLowerCase());
+    return foundKey ? obj[foundKey] : undefined;
+  };
+
   const trainModel = (matches, xi) => {
     const teamStats = {};
     const allTeams = new Set([...matches.map(m => m.home), ...matches.map(m => m.away)]);
     allTeams.forEach(t => teamStats[t] = { attack_raw: 0, defense_raw: 0, hfa_raw: 0 });
     let currentHfa = 0.25, currentRho = 0.00;
     const now = new Date();
-    let totalError = 0;
-    const weightedMatches = matches.map(m => ({ ...m, weight: Math.exp(-xi * Math.max(0, (now - m.matchDate) / (1000 * 60 * 60 * 24))) }));
+
+    const weightedMatches = matches.map(m => ({
+      ...m, weight: Math.exp(-xi * Math.max(0, (now - m.matchDate) / (1000 * 60 * 60 * 24)))
+    }));
 
     for (let e = 0; e < EPOCHS; e++) {
-      totalError = 0;
-      const shuffled = [...weightedMatches].sort(() => Math.random() - 0.5);
-      shuffled.forEach(match => {
+      weightedMatches.forEach(match => {
         const h = teamStats[match.home], a = teamStats[match.away];
         const lambdaH = Math.exp(h.attack_raw + a.defense_raw + (currentHfa + h.hfa_raw)/2);
         const lambdaA = Math.exp(a.attack_raw + h.defense_raw);
         const errorH = match.hPond - lambdaH, errorA = match.aPond - lambdaA;
         
-        totalError += (errorH * errorH + errorA * errorA) * match.weight;
-        
         h.attack_raw += LEARNING_RATE * errorH * match.weight;
         a.attack_raw += LEARNING_RATE * errorA * match.weight;
-        
-        // Defesa: se sofreu mais que esperado, defesa_raw SOBE (piora).
         a.defense_raw += LEARNING_RATE * errorH * match.weight; 
         h.defense_raw += LEARNING_RATE * errorA * match.weight; 
-        
         h.hfa_raw += (LEARNING_RATE * 0.2) * errorH * match.weight;
         currentHfa += (LEARNING_RATE * 0.05) * errorH * match.weight;
-        
         if (match.hPond <= 1 && match.aPond <= 1) {
            const lowScoreError = (match.hPond === match.aPond ? 1 : -1); 
            currentRho += (LEARNING_RATE * 0.01) * lowScoreError * match.weight;
         }
       });
     }
-    return { teamStats, hfa: currentHfa, rho: Math.max(-0.15, Math.min(0.15, currentRho)), error: totalError };
+    return { teamStats, hfa: currentHfa, rho: Math.max(-0.15, Math.min(0.15, currentRho)) };
   };
 
   const processTrainingData = (matches) => {
@@ -240,25 +204,42 @@ export default function App() {
       const hG = getInsensitive(m, 'hgoals') || 0, aG = getInsensitive(m, 'agoals') || 0;
       const hxG = getInsensitive(m, 'hxg') || hG, axG = getInsensitive(m, 'axg') || aG;
       const matchDate = new Date(getInsensitive(m, 'data'));
-      return { home, away, matchDate, hPond: 0.7 * hxG + 0.3 * hG, aPond: 0.7 * axG + 0.3 * aG };
+      return { home, away, matchDate, hPond: 0.7 * hxG + 0.3 * hG, aPond: 0.7 * axG + 0.3 * aG, hG, aG };
     }).filter(m => m.home && m.away && !isNaN(m.matchDate));
     processed.sort((a, b) => a.matchDate - b.matchDate);
-    let bestXi = 0.0019, minErr = Infinity, bestModel = null;
+    
+    const splitIdx = Math.floor(processed.length * 0.85);
+    const trainSet = processed.slice(0, splitIdx);
+    const validationSet = processed.slice(splitIdx);
+
+    let bestXi = 0.0019, minRps = Infinity;
     XI_CANDIDATES.forEach(xi => {
-      const res = trainModel(processed, xi);
-      if (res.error < minErr) { minErr = res.error; bestXi = xi; bestModel = res; }
+      const model = trainModel(trainSet, xi);
+      let totalRps = 0;
+      validationSet.forEach(m => {
+          const tH = { ...model.teamStats[m.home], attack: model.teamStats[m.home].attack_raw * UI_SCALE_FACTOR, defense: model.teamStats[m.home].defense_raw * UI_SCALE_FACTOR };
+          const tA = { ...model.teamStats[m.away], attack: model.teamStats[m.away].attack_raw * UI_SCALE_FACTOR, defense: model.teamStats[m.away].defense_raw * UI_SCALE_FACTOR };
+          const sim = runMonteCarlo(tH, tA, model.hfa, model.rho, 2000);
+          const outcome = m.hG > m.aG ? 'H' : (m.hG < m.aG ? 'A' : 'D');
+          totalRps += calculateRPS(sim.probs, outcome);
+      });
+      const avgRps = totalRps / validationSet.length;
+      if (avgRps < minRps) { minRps = avgRps; bestXi = xi; }
     });
-    const finalTeams = bestModel.teamStats, tCount = Object.keys(finalTeams).length;
+
+    const finalModel = trainModel(processed, bestXi);
+    const finalTeams = finalModel.teamStats, tCount = Object.keys(finalTeams).length;
     const avgAtt = Object.values(finalTeams).reduce((s, t) => s + t.attack_raw, 0) / tCount;
     const avgDef = Object.values(finalTeams).reduce((s, t) => s + t.defense_raw, 0) / tCount;
     Object.keys(finalTeams).forEach(n => {
       const att_zeroed = finalTeams[n].attack_raw - avgAtt, def_zeroed = finalTeams[n].defense_raw - avgDef;
-      finalTeams[n].attack = Math.max(-5, Math.min(5, att_zeroed * UI_SCALE_FACTOR));
-      finalTeams[n].defense = Math.max(-5, Math.min(5, def_zeroed * UI_SCALE_FACTOR));
+      // ATUALIZAÇÃO: Escala limitada a [-3, +3]
+      finalTeams[n].attack = Math.max(-3, Math.min(3, att_zeroed * UI_SCALE_FACTOR));
+      finalTeams[n].defense = Math.max(-3, Math.min(3, def_zeroed * UI_SCALE_FACTOR));
       finalTeams[n].hfa_raw = finalTeams[n].hfa_raw;
     });
     setTeams(finalTeams);
-    setGlobalParams({ hfa: bestModel.hfa, rho: bestModel.rho, xi: bestXi });
+    setGlobalParams({ hfa: finalModel.hfa, rho: finalModel.rho, xi: bestXi });
     setMetrics({ dataCount: processed.length, avgGoals: processed.reduce((s,m) => s + m.hPond + m.aPond, 0) / processed.length });
   };
 
@@ -368,11 +349,7 @@ export default function App() {
     }, 400);
   };
 
-  const handleResetMatch = () => {
-    setSelectedHome('');
-    setSelectedAway('');
-    setSimulationResult(null);
-  };
+  const handleResetMatch = () => { setSelectedHome(''); setSelectedAway(''); setSimulationResult(null); };
 
   const handleSimulateRound = () => {
     if (!roundGamesData.length) return;
@@ -380,11 +357,7 @@ export default function App() {
     setTimeout(() => {
         const results = {};
         roundGamesData.forEach(m => {
-            const hStats = teams[m.home];
-            const aStats = teams[m.away];
-            if (hStats && aStats) {
-                results[`${m.home}-${m.away}`] = runMonteCarlo(hStats, aStats, globalParams.hfa, globalParams.rho, 10000);
-            }
+            if (teams[m.home] && teams[m.away]) results[`${m.home}-${m.away}`] = runMonteCarlo(teams[m.home], teams[m.away], globalParams.hfa, globalParams.rho, 10000);
         });
         setRoundResults(results);
         setIsSimulatingRound(false);
@@ -405,15 +378,15 @@ export default function App() {
   return (
     <div className="min-h-screen bg-slate-50 font-sans text-slate-900 pb-12">
       <nav className="bg-white border-b border-slate-200 sticky top-0 z-50 px-4 py-2.5 flex justify-between items-center shadow-sm">
-        <div className="flex items-center gap-2 sm:gap-3">
+        <div className="flex items-center gap-2">
           <div className="bg-slate-900 p-1.5 rounded-lg shrink-0"><Target className="text-orange-400 w-4 h-4 sm:w-5 sm:h-5" /></div>
           <div>
-            <h1 className="text-xs sm:text-sm font-black tracking-tighter uppercase leading-none text-slate-800">Dixon-Coles Pro</h1>
-            <p className="text-[7px] sm:text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-1 italic leading-none">Época 2026</p>
+            <h1 className="text-[11px] sm:text-sm font-black tracking-tighter uppercase leading-none text-slate-800">Dixon-Coles Pro</h1>
+            <p className="text-[7px] sm:text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-0.5 italic">XI: {globalParams.xi.toFixed(4)}</p>
           </div>
         </div>
         
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 sm:gap-4">
           {modelAccuracy && (
             <div className="flex flex-col items-end border-r border-slate-200 pr-2 sm:pr-4">
                 <span className="text-[7px] font-black text-slate-400 uppercase leading-none">Backtesting</span>
@@ -435,12 +408,12 @@ export default function App() {
         {/* JOGO ÚNICO */}
         {activeTab === 'match' && (
           <div className="space-y-5 animate-in fade-in duration-500">
-            <section className="bg-white rounded-[2rem] shadow-xl shadow-slate-200/40 border border-slate-200 overflow-hidden">
-              <div className="bg-slate-900 p-5 text-white relative">
+            <section className="bg-white rounded-[2rem] shadow-xl border border-slate-200 overflow-hidden">
+              <div className="bg-slate-900 p-4 sm:p-5 text-white relative">
                 <div className="flex flex-col gap-3">
                     <div className="space-y-1">
                       <label className="text-[8px] font-black text-slate-500 uppercase tracking-widest ml-1 leading-none">Mandante</label>
-                      <select value={selectedHome} onChange={(e) => setSelectedHome(e.target.value)} className="w-full bg-white/10 border border-white/20 rounded-xl p-2.5 font-black text-sm outline-none text-white appearance-none cursor-pointer leading-tight">
+                      <select value={selectedHome} onChange={(e) => setSelectedHome(e.target.value)} className="w-full bg-white/10 border border-white/20 rounded-xl p-2.5 font-bold text-sm outline-none text-white appearance-none cursor-pointer leading-tight">
                         <option value="" className="text-slate-900">Selecionar...</option>
                         {Object.keys(teams).sort().map(t => <option key={t} value={t} className="text-slate-900">{t}</option>)}
                       </select>
@@ -448,14 +421,14 @@ export default function App() {
                     <div className="flex justify-center text-orange-500/50 text-lg font-black italic leading-none py-0.5">VS</div>
                     <div className="space-y-1">
                       <label className="text-[8px] font-black text-slate-500 uppercase tracking-widest ml-1 block leading-none">Visitante</label>
-                      <select value={selectedAway} onChange={(e) => setSelectedAway(e.target.value)} className="w-full bg-white/10 border border-white/20 rounded-xl p-2.5 font-black text-sm outline-none text-white appearance-none cursor-pointer leading-tight">
+                      <select value={selectedAway} onChange={(e) => setSelectedAway(e.target.value)} className="w-full bg-white/10 border border-white/20 rounded-xl p-2.5 font-bold text-sm outline-none text-white appearance-none cursor-pointer leading-tight">
                         <option value="" className="text-slate-900">Selecionar...</option>
                         {Object.keys(teams).sort().map(t => <option key={t} value={t} className="text-slate-900">{t}</option>)}
                       </select>
                     </div>
                 </div>
                 <div className="mt-6 flex gap-3">
-                  <button onClick={handleSimulateMatch} disabled={isSimulating || !selectedHome || !selectedAway || selectedHome === selectedAway} className="flex-1 py-4.5 rounded-xl font-black text-white uppercase tracking-widest shadow-2xl bg-orange-600 hover:bg-orange-500 transition-all active:scale-[0.98] disabled:opacity-30 flex items-center justify-center gap-2 text-[10px]">
+                  <button onClick={handleSimulateMatch} disabled={isSimulating || !selectedHome || !selectedAway || selectedHome === selectedAway} className="flex-1 py-4.5 rounded-xl font-black text-white uppercase tracking-widest bg-orange-600 hover:bg-orange-500 transition-all active:scale-[0.98] disabled:opacity-30 flex items-center justify-center gap-2 text-[10px]">
                     {isSimulating ? <Activity className="animate-spin w-4 h-4" /> : <Play className="fill-current w-3.5 h-3.5" />} PREVISÃO
                   </button>
                   <button onClick={handleResetMatch} className="py-4 px-5 rounded-xl bg-white/10 hover:bg-white/20 text-white transition-all shadow-xl flex items-center justify-center" title="Limpar"><Trash2 className="w-4 h-4" /></button>
@@ -476,7 +449,7 @@ export default function App() {
                   </div>
                   <div className="bg-white p-3 rounded-2xl border border-slate-100 shadow-sm text-right">
                       <div className="flex items-center gap-2 mb-2 justify-end">
-                          <span className="text-[10px] font-black uppercase text-slate-800 truncate">{selectedAway}</span>
+                          <span className="text-[9px] font-black uppercase text-slate-800 truncate">{selectedAway}</span>
                           <MapPin className="w-3 h-3 text-blue-400 shrink-0" />
                       </div>
                       <div className="flex justify-between items-center mb-1 leading-none text-[10px]"><span className="text-slate-400 font-bold uppercase">Atq:</span><span className="font-black text-emerald-600">{teams[selectedAway]?.attack.toFixed(2)}</span></div>
@@ -488,20 +461,21 @@ export default function App() {
                   <div className="bg-white p-3 rounded-2xl border border-slate-100 shadow-sm text-center">
                     <p className="text-[8px] font-black text-slate-300 uppercase mb-1.5 truncate leading-none">{selectedHome}</p>
                     <h3 className="text-xl font-black text-slate-800 tabular-nums leading-none">{simulationResult.probs.home.toFixed(1)}%</h3>
-                    <div className="mt-2 flex flex-col gap-1">
-                      <span className="text-[8px] font-black text-emerald-600 bg-emerald-50 px-1 py-0.5 rounded-full uppercase leading-none">Odd: {calcOdd(simulationResult.probs.home)}</span>
+                    <div className="mt-2 flex flex-col gap-1 leading-none">
+                      <span className="text-[8px] font-black text-emerald-600 bg-emerald-50 px-1 py-0.5 rounded-full uppercase">Odd: {calcOdd(simulationResult.probs.home)}</span>
                       <span className="text-[8px] font-bold text-slate-400 uppercase italic">xG: {simulationResult.expectedGoals.home.toFixed(2)}</span>
                     </div>
                   </div>
                   <div className="bg-white p-3 rounded-2xl border border-slate-100 shadow-sm text-center flex flex-col justify-center">
                     <p className="text-[8px] font-black text-slate-300 uppercase mb-1.5 leading-none">Empate</p>
                     <h3 className="text-xl font-black text-slate-800 tabular-nums leading-none">{simulationResult.probs.draw.toFixed(1)}%</h3>
+                    <div className="mt-2"><span className="text-[8px] font-black text-slate-500 bg-slate-50 px-2 py-0.5 rounded-full uppercase">Odd: {calcOdd(simulationResult.probs.draw)}</span></div>
                   </div>
                   <div className="bg-white p-3 rounded-2xl border border-slate-100 shadow-sm text-center">
                     <p className="text-[8px] font-black text-slate-300 uppercase mb-1.5 truncate leading-none">{selectedAway}</p>
                     <h3 className="text-xl font-black text-slate-800 tabular-nums leading-none">{simulationResult.probs.away.toFixed(1)}%</h3>
-                    <div className="mt-1.5 flex flex-col gap-1">
-                      <span className="text-[8px] font-black text-blue-600 bg-blue-50 px-1 py-0.5 rounded-full uppercase leading-none">Odd: {calcOdd(simulationResult.probs.away)}</span>
+                    <div className="mt-2 flex flex-col gap-1 leading-none">
+                      <span className="text-[8px] font-black text-blue-600 bg-blue-50 px-1 py-0.5 rounded-full uppercase">Odd: {calcOdd(simulationResult.probs.away)}</span>
                       <span className="text-[8px] font-bold text-slate-400 uppercase italic">xG: {simulationResult.expectedGoals.away.toFixed(2)}</span>
                     </div>
                   </div>
@@ -533,14 +507,14 @@ export default function App() {
                         <div className="w-full max-w-[450px]">
                           <div className="grid grid-cols-7 gap-0.5 pb-1">
                             <div className="col-span-1"></div>
-                            {Array.from({length: 6}).map((_, i) => <div key={i} className="text-center text-[12px] sm:text-sm font-black text-slate-400 uppercase leading-none pb-1">{i}</div>)}
+                            {Array.from({length: 6}).map((_, i) => <div key={i} className="text-center text-[10px] font-black text-slate-400 uppercase leading-none pb-1">{i}</div>)}
                             {simulationResult.matrix.map((row, hS) => (
                               <React.Fragment key={hS}>
                                 <div className="flex items-center justify-end pr-2 text-[10px] font-black text-slate-400 uppercase leading-none">{hS}</div>
                                 {row.map((prob, aS) => {
                                   const intensity = Math.min(prob * 10, 100);
                                   return (
-                                    <div key={aS} className="aspect-square rounded-sm flex items-center justify-center transition-all cursor-help group relative border border-white/5" style={{ backgroundColor: `rgba(234, 88, 12, ${intensity / 100})`, color: intensity > 40 ? 'white' : '#9a3412' }}>
+                                    <div key={aS} className="aspect-square rounded-sm flex items-center justify-center border border-white/5" style={{ backgroundColor: `rgba(234, 88, 12, ${intensity / 100})`, color: intensity > 40 ? 'white' : '#9a3412' }}>
                                       <span className="text-[11px] sm:text-[14px] font-black tabular-nums leading-none">{prob.toFixed(1)}%</span>
                                     </div>
                                   );
@@ -560,7 +534,7 @@ export default function App() {
         {/* RODADA */}
         {activeTab === 'round' && (
           <div className="space-y-5 animate-in fade-in duration-500">
-              <section className="bg-white rounded-[1.5rem] shadow-sm border border-slate-200 p-5 md:p-8 text-center sm:text-left">
+              <section className="bg-white rounded-[1.5rem] border border-slate-200 p-5 md:p-8 text-center sm:text-left">
                   <div className="flex flex-col sm:flex-row items-center justify-between mb-6 gap-4">
                       <h3 className="font-black text-slate-800 text-sm sm:text-lg uppercase tracking-tight flex items-center gap-2 leading-none"><Calendar className="w-4 h-4 sm:w-5 sm:h-5 text-orange-500" /> Previsões da Rodada</h3>
                       <div className="flex items-center gap-3 w-full sm:w-auto">
@@ -571,24 +545,24 @@ export default function App() {
                       </div>
                   </div>
 
-                  <button onClick={handleSimulateRound} disabled={isSimulatingRound || !roundGamesData.length} className="w-full mb-6 py-6 bg-orange-600 hover:bg-orange-500 text-white rounded-2xl font-black text-xs uppercase tracking-widest transition-all disabled:opacity-50 flex items-center justify-center gap-4 shadow-xl">
-                      {isSimulatingRound ? <RefreshCw className="animate-spin w-5 h-5" /> : <Play className="w-5 h-5 fill-current" />} SIMULAR RODADA
+                  <button onClick={handleSimulateRound} disabled={isSimulatingRound || !roundGamesData.length} className="w-full mb-6 py-6 bg-orange-600 hover:bg-orange-500 text-white rounded-xl font-black text-xs uppercase tracking-widest disabled:opacity-50 flex items-center justify-center gap-4 shadow-xl h-16">
+                      {isSimulatingRound ? <Activity className="animate-spin w-5 h-5" /> : <Play className="w-5 h-5 fill-current" />} SIMULAR RODADA
                   </button>
 
                   <div className="grid grid-cols-1 gap-3">
                       {roundGamesData.length > 0 ? roundGamesData.map((m, idx) => {
                           const result = roundResults[`${m.home}-${m.away}`];
                           return (
-                              <div key={idx} className="bg-slate-50 rounded-2xl p-4 border border-slate-100 flex items-center justify-between group hover:bg-white hover:shadow-xl transition-all relative overflow-hidden">
+                              <div key={idx} className="bg-slate-50 rounded-2xl p-3.5 border border-slate-100 flex items-center justify-between group hover:bg-white hover:shadow-lg transition-all relative overflow-hidden">
                                   {/* Casa - Forçado para Esquerda */}
                                   <div className="flex-1 text-left flex flex-col gap-1 pr-1">
                                       <p className="font-black text-slate-800 uppercase leading-none truncate w-full text-left" style={{ fontSize: 'clamp(10px, 3.1vw, 14px)' }}>{m.home}</p>
                                       {result ? (
                                           <>
-                                              <p className="text-[14px] sm:text-lg font-black text-emerald-600 leading-none text-left">{result.probs.home.toFixed(1)}%</p>
+                                              <p className="text-[13px] sm:text-base font-black text-emerald-600 leading-none text-left">{result.probs.home.toFixed(1)}%</p>
                                               <div className="flex flex-col leading-tight mt-1 items-start text-left">
                                                   <span className="text-[8px] sm:text-[9px] text-slate-400 font-bold uppercase italic leading-none">xG: {result.expectedGoals.home.toFixed(2)}</span>
-                                                  <span className="text-[8px] sm:text-[9px] text-slate-400 font-bold uppercase italic leading-none mt-1">Odd: {calcOdd(result.probs.home)}</span>
+                                                  <span className="text-[8px] sm:text-[9px] text-slate-400 font-bold uppercase italic leading-none mt-0.5">Odd: {calcOdd(result.probs.home)}</span>
                                               </div>
                                           </>
                                       ) : <p className="text-[8px] text-slate-300 font-black uppercase leading-none text-left">Pendente</p>}
@@ -613,7 +587,7 @@ export default function App() {
                                               <p className="text-[14px] sm:text-lg font-black text-blue-600 leading-none text-right">{result.probs.away.toFixed(1)}%</p>
                                               <div className="flex flex-col items-end leading-tight mt-1 text-right">
                                                   <span className="text-[8px] sm:text-[9px] text-slate-400 font-bold uppercase italic leading-none">xG: {result.expectedGoals.away.toFixed(2)}</span>
-                                                  <span className="text-[8px] sm:text-[9px] text-slate-400 font-bold uppercase italic leading-none mt-1">Odd: {calcOdd(result.probs.away)}</span>
+                                                  <span className="text-[8px] sm:text-[9px] text-slate-400 font-bold uppercase italic leading-none mt-0.5">Odd: {calcOdd(result.probs.away)}</span>
                                               </div>
                                           </>
                                       ) : <p className="text-[8px] text-slate-300 font-black uppercase leading-none text-right">Pendente</p>}
@@ -629,10 +603,10 @@ export default function App() {
         {/* LIGA */}
         {activeTab === 'league' && (
           <div className="space-y-6 animate-in fade-in duration-500">
-            <section className="bg-white rounded-[1.5rem] shadow-sm border border-slate-200 p-5 md:p-10 text-center sm:text-left">
+            <section className="bg-white rounded-[1.5rem] border border-slate-200 p-5 md:p-8 text-center sm:text-left">
               <div className="flex flex-col justify-between items-center gap-6 mb-8 text-center">
-                <h3 className="font-black text-slate-800 text-base uppercase tracking-tight flex items-center justify-center gap-3 leading-none"><Trophy className="w-6 h-6 text-yellow-500 fill-current" /> Temporada 2026</h3>
-                <button onClick={runLeagueSimulation} disabled={isSimulatingLeague || !leagueSchedule.length} className="w-full sm:w-auto px-10 py-6 bg-slate-900 text-white rounded-2xl font-black text-xs uppercase shadow-xl transition-all active:scale-95 flex items-center justify-center gap-4">
+                <h3 className="font-black text-slate-800 text-base uppercase tracking-tight flex items-center justify-center gap-2 leading-none"><Trophy className="w-6 h-6 text-yellow-500 fill-current" /> Temporada 2026</h3>
+                <button onClick={runLeagueSimulation} disabled={isSimulatingLeague || !leagueSchedule.length} className="w-full sm:w-auto px-10 py-6 bg-slate-900 text-white rounded-2xl font-black text-xs uppercase shadow-xl transition-all active:scale-95 flex items-center justify-center gap-4 h-16">
                   {isSimulatingLeague ? <RefreshCw className="animate-spin w-5 h-5" /> : <TableIcon className="w-5 h-5" />} SIMULAR TEMPORADA
                 </button>
               </div>
@@ -646,7 +620,7 @@ export default function App() {
                       {leagueTable.map((row, idx) => (
                         <tr key={row.name} className="hover:bg-orange-50/20 transition-colors">
                           <td className="px-1 py-4 text-slate-300 font-black text-center text-[10px]">{idx + 1}</td>
-                          <td className="px-2 py-4 text-slate-900 font-black uppercase tracking-tighter truncate max-w-[85px] leading-tight text-[11px]">{row.name}</td>
+                          <td className="px-2 py-4 text-slate-900 font-black uppercase tracking-tighter truncate max-w-[75px] leading-tight text-[11px]">{row.name}</td>
                           <td className="px-1 py-4 text-center font-mono font-black text-slate-900 bg-slate-50/50 text-[11px] leading-none">{row.avgPoints.toFixed(1)}</td>
                           <td className="px-1 py-4 text-center font-black text-orange-600 text-[11px] leading-none">{row.titleProb > 0.05 ? `${row.titleProb.toFixed(1)}%` : '-'}</td>
                           <td className="px-1 py-4 text-center font-black text-emerald-600 text-[11px] leading-none">{row.libertaProb > 0.05 ? `${row.libertaProb.toFixed(1)}%` : '-'}</td>
@@ -665,16 +639,16 @@ export default function App() {
         {activeTab === 'ranking' && (
           <div className="space-y-6 animate-in fade-in duration-500">
              <section className="bg-white rounded-[1.5rem] shadow-xl border border-slate-200 overflow-hidden">
-                <div className="p-6 md:p-10 bg-slate-50 border-b border-slate-200 text-center sm:text-left">
+                <div className="p-5 md:p-8 bg-slate-50 border-b border-slate-200 text-center sm:text-left">
                     <div className="flex flex-col sm:flex-row items-center justify-between mb-8 gap-4">
                         <div className="space-y-1">
                             <h3 className="font-black text-slate-800 text-lg uppercase tracking-tight leading-none">Power Ranking Técnico</h3>
-                            <p className="text-[10px] text-slate-400 font-black uppercase tracking-[0.2em] leading-none mt-2">Dixon-Coles WMLE [-5, +5]</p>
+                            <p className="text-[9px] text-slate-400 font-black uppercase tracking-[0.2em] leading-none mt-2">Dixon-Coles WMLE [-3, +3]</p>
                         </div>
                         <Award className="w-8 h-8 text-orange-500 shrink-0" />
                     </div>
                     <div className="relative group">
-                        <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-300 group-focus-within:text-orange-500 transition-all" />
+                        <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-300 group-focus-within:text-orange-500 transition-all" />
                         <input type="text" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="Pesquisar por equipa..." className="w-full bg-white border-2 border-slate-100 rounded-2xl py-4 pl-12 pr-4 font-bold text-sm outline-none focus:ring-4 focus:ring-orange-500/10 focus:border-orange-500 transition-all shadow-sm" />
                     </div>
                 </div>
