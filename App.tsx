@@ -360,7 +360,7 @@ export default function App() {
           <div className="bg-[#ff5e3a] p-1 rounded-md shadow-[2px_2px_0px_#2b2c34]"><Target className="text-[#fffffe] w-4 h-4" /></div>
           <div>
             <h1 className="text-[11px] font-black tracking-tight uppercase leading-none">Dixon-Coles Pro</h1>
-            <p className="text-[9px] font-bold text-[#ff8906] uppercase mt-1 italic">XI: {globalParams.xi.toFixed(4)}</p>
+            <p className="text-[9px] font-bold text-[#ff8906] uppercase mt-0.5 italic">XI: {globalParams.xi.toFixed(4)}</p>
           </div>
         </div>
         
@@ -503,8 +503,9 @@ export default function App() {
                           {Array.from({length: 38}).map((_, i) => <option key={i+1} value={i+1}>{i+1}</option>)}
                       </select>
                   </div>
-                  <button onClick={handleSimulateRound} disabled={isSimulatingRound || !roundGamesData.length} className="w-full mb-5 py-4.5 bg-[#ff5e3a] text-[#fffffe] rounded-xl font-black text-[11px] uppercase shadow-[2px_2px_0px_#2b2c34] active:translate-y-[2px] active:shadow-none transition-all">
-                      {isSimulatingRound ? <Activity className="animate-spin w-5 h-5 mx-auto" /> : "SIMULAR RODADA"}
+                  {/* BOTÃO RE-CALIBRADO - py-6 h-16 */}
+                  <button onClick={handleSimulateRound} disabled={isSimulatingRound || !roundGamesData.length} className="w-full h-16 mb-5 py-6 bg-[#ff5e3a] text-[#fffffe] rounded-xl font-black text-[11px] uppercase shadow-[2px_2px_0px_#2b2c34] active:translate-y-[2px] active:shadow-none transition-all flex items-center justify-center gap-3">
+                      {isSimulatingRound ? <Activity className="animate-spin w-5 h-5 mx-auto" /> : <><Play className="w-5 h-5 fill-current" /> SIMULAR RODADA</>}
                   </button>
                   <div className="grid grid-cols-1 gap-3">
                       {roundGamesData.map((m, idx) => {
@@ -552,13 +553,14 @@ export default function App() {
           </div>
         )}
 
-        {/* LIGA COMPACTA MOBILE */}
+        {/* LIGA */}
         {activeTab === 'league' && (
           <div className="space-y-4 animate-in">
             <section className="bg-[#fffffe] rounded-2xl border-2 border-[#2b2c34] p-4 shadow-[4px_4px_0px_#2b2c34]">
               <div className="flex flex-col gap-3 mb-6 text-center">
                 <h3 className="font-black text-[#2b2c34] text-[13px] uppercase flex items-center justify-center gap-2 leading-none"><Trophy className="w-5 h-5 text-[#ff5e3a] fill-current" /> TEMPORADA 2026</h3>
-                <button onClick={runLeagueSimulation} disabled={isSimulatingLeague || !leagueSchedule.length} className="w-full py-5 bg-[#ff5e3a] text-[#fffffe] rounded-xl font-black text-[11px] uppercase shadow-[2px_2px_0px_#2b2c34] active:translate-y-[2px] active:shadow-none transition-all">
+                {/* BOTÃO RE-CALIBRADO - py-6 h-16 */}
+                <button onClick={runLeagueSimulation} disabled={isSimulatingLeague || !leagueSchedule.length} className="w-full h-16 py-6 bg-[#ff5e3a] text-[#fffffe] rounded-xl font-black text-[11px] uppercase shadow-[2px_2px_0px_#2b2c34] active:translate-y-[2px] active:shadow-none transition-all">
                   {isSimulatingLeague ? <Activity className="animate-spin w-5 h-5 mx-auto" /> : "SIMULAR TEMPORADA"}
                 </button>
               </div>
@@ -566,14 +568,14 @@ export default function App() {
                 <div className="overflow-x-hidden rounded-xl border-2 border-[#2b2c34]">
                   <table className="w-full text-left border-collapse table-fixed">
                     <thead className="bg-[#f0f4f8] text-[8.5px] font-black text-[#2b2c34] uppercase border-b-2 border-[#2b2c34] tracking-tighter">
-                      <tr><th className="px-1 py-3.5 w-6 text-center">#</th><th className="px-1.5 py-3.5 w-[28%]">EQUIPE</th><th className="px-1 py-3.5 text-center">XPTS</th><th className="px-1 py-3.5 text-center text-[#ff5e3a]">TIT</th><th className="px-1 py-3.5 text-center text-[#059669]">G6</th><th className="px-1 py-3.5 text-center text-[#e45858]">Z4</th></tr>
+                      <tr><th className="px-1 py-3.5 w-6 text-center">#</th><th className="px-1.5 py-3.5 w-[28%]">EQUIPE</th><th className="px-1.5 py-3.5 text-center">XPTS</th><th className="px-1 py-3.5 text-center text-[#ff5e3a]">TIT</th><th className="px-1 py-3.5 text-center text-[#059669]">G6</th><th className="px-1 py-3.5 text-center text-[#e45858]">Z4</th></tr>
                     </thead>
                     <tbody className="divide-y divide-[#2b2c34]/5 text-[11px] font-black text-[#2b2c34]">
                       {leagueTable.map((row, idx) => (
                         <tr key={row.name} className="hover:bg-[#ff5e3a]/5 transition-colors">
                           <td className="px-1 py-3 text-[#2b2c34]/40 text-center text-[9px]">{idx + 1}</td>
                           <td className="px-1.5 py-3 uppercase truncate max-w-[65px] leading-none">{row.name}</td>
-                          <td className="px-1 py-3 text-center font-mono bg-[#f0f4f8]/50 text-[12px]">{row.avgPoints.toFixed(1)}</td>
+                          <td className="px-1.5 py-3 text-center font-mono bg-[#f0f4f8]/50 text-[12px]">{row.avgPoints.toFixed(1)}</td>
                           <td className="px-1 py-3 text-center text-[#ff5e3a]">{row.titleProb > 0.05 ? `${row.titleProb.toFixed(1)}%` : '-'}</td>
                           <td className="px-1 py-3 text-center text-[#059669]">{row.libertaProb > 0.05 ? `${row.libertaProb.toFixed(1)}%` : '-'}</td>
                           <td className="px-1 py-3 text-center text-[#e45858]">{row.z4Prob > 0.05 ? `${row.z4Prob.toFixed(1)}%` : '-'}</td>
@@ -587,7 +589,7 @@ export default function App() {
           </div>
         )}
 
-        {/* RANKING COMPACTO MOBILE */}
+        {/* RANKING */}
         {activeTab === 'ranking' && (
           <div className="space-y-4 animate-in">
              <section className="bg-[#fffffe] rounded-2xl shadow-[4px_4px_0px_#2b2c34] border-2 border-[#2b2c34] overflow-hidden">
