@@ -36,11 +36,11 @@ const SEASON_SHEET_TAB = 'Rodadas_com jogos faltantes';
 const SIMULATION_COUNT = 10000; 
 const LEAGUE_SIM_COUNT = 10000; 
 const EPOCHS = 100; 
-const LEARNING_RATE = 0.012; 
+const LEARNING_RATE = 0.01; // Ajustado para evitar explosão dos parâmetros
 const XI_CANDIDATES = [0.000, 0.0005, 0.0010, 0.0015, 0.0020, 0.0025, 0.0030]; 
 
-const UI_SCALE_FACTOR = 11; 
-const MAX_RATING = 3.0; 
+// Fator de escala ajustado para distribuir melhor entre -3 e +3 sem bater no teto
+const UI_SCALE_FACTOR = 7; 
 
 /**
  * UTILITÁRIOS ESTATÍSTICOS
@@ -76,15 +76,19 @@ const calculateRPS = (probs, outcome) => {
 };
 
 const runMonteCarlo = (homeTeam, awayTeam, globalHfa, rho, iterations) => {
+  // Removido o clamp para usar o valor real da força
   const attH = (homeTeam?.attack || 0) / UI_SCALE_FACTOR;
   const defH = (homeTeam?.defense || 0) / UI_SCALE_FACTOR;
   const attA = (awayTeam?.attack || 0) / UI_SCALE_FACTOR;
   const defA = (awayTeam?.defense || 0) / UI_SCALE_FACTOR;
   const hfa_eff = ((globalHfa + (homeTeam?.hfa_raw || 0)) / 2);
+
   const lambdaH = Math.exp(attH + defA + hfa_eff);
   const lambdaA = Math.exp(attA + defH);
+
   let homeWins = 0, draws = 0, awayWins = 0;
   let scoreMatrix = Array(6).fill(0).map(() => Array(6).fill(0));
+
   for (let i = 1; i <= iterations; i++) {
     let hG = simulatePoisson(lambdaH);
     let aG = simulatePoisson(lambdaA);
@@ -96,6 +100,7 @@ const runMonteCarlo = (homeTeam, awayTeam, globalHfa, rho, iterations) => {
     scoreMatrix[cH][cA]++;
     if (hG > aG) homeWins++; else if (aG > hG) awayWins++; else draws++;
   }
+
   return {
     probs: { home: (homeWins / iterations) * 100, draw: (draws / iterations) * 100, away: (awayWins / iterations) * 100 },
     matrix: scoreMatrix.map(row => row.map(count => (count / iterations) * 100)),
@@ -220,8 +225,10 @@ export default function App() {
     const avgDef = Object.values(finalTeams).reduce((s, t) => s + t.defense_raw, 0) / tCount;
     Object.keys(finalTeams).forEach(n => {
       const att_zeroed = finalTeams[n].attack_raw - avgAtt, def_zeroed = finalTeams[n].defense_raw - avgDef;
-      finalTeams[n].attack = Math.max(-MAX_RATING, Math.min(MAX_RATING, att_zeroed * UI_SCALE_FACTOR));
-      finalTeams[n].defense = Math.max(-MAX_RATING, Math.min(MAX_RATING, def_zeroed * UI_SCALE_FACTOR));
+      // Removida a limitação artificial (Clamp) para permitir que os times se distanciem
+      finalTeams[n].attack = att_zeroed * UI_SCALE_FACTOR;
+      finalTeams[n].defense = def_zeroed * UI_SCALE_FACTOR;
+      finalTeams[n].hfa_raw = finalTeams[n].hfa_raw;
     });
     setTeams(finalTeams);
     setGlobalParams({ hfa: finalModel.hfa, rho: finalModel.rho, xi: bestXi });
@@ -339,7 +346,8 @@ export default function App() {
   if (loading) return (
     <div className="min-h-screen bg-[#f0f4f8] flex flex-col items-center justify-center text-[#2b2c34] p-4 text-center font-roboto">
       <Activity className="w-10 h-10 text-[#ff5e3a] animate-pulse mb-4" />
-      <h2 className="text-lg font-black uppercase tracking-tighter leading-tight">Sincronizando Modelos...</h2>
+      <h2 className="text-lg font-black uppercase tracking-tighter leading-tight">Calibrando Inteligência 2026</h2>
+      <p className="text-slate-500 text-[10px] mt-4 font-mono uppercase tracking-[0.2em]">Optimizing Odds | Season Mapping</p>
     </div>
   );
 
@@ -354,7 +362,6 @@ export default function App() {
         .animate-in { animation: fade-in 0.4s ease-out; }
       `}} />
 
-      {/* HEADER COMPACTO */}
       <nav className="bg-[#fffffe] border-b-2 border-[#2b2c34] sticky top-0 z-50 px-3 py-2 flex justify-between items-center shadow-md">
         <div className="flex items-center gap-2">
           <div className="bg-[#ff5e3a] p-1 rounded-md shadow-[2px_2px_0px_#2b2c34]"><Target className="text-[#fffffe] w-4 h-4" /></div>
@@ -363,7 +370,6 @@ export default function App() {
             <p className="text-[9px] font-bold text-[#ff8906] uppercase mt-0.5 italic">XI: {globalParams.xi.toFixed(4)}</p>
           </div>
         </div>
-        
         <div className="flex items-center gap-2">
           {modelAccuracy && (
             <div className="flex flex-col items-end border-r border-[#2b2c34]/10 pr-2">
@@ -376,7 +382,6 @@ export default function App() {
       </nav>
 
       <main className="max-w-3xl mx-auto p-2 space-y-4">
-        {/* TAB NAVIGATION */}
         <div className="flex flex-row gap-1 p-1 bg-[#fffffe] rounded-xl border-2 border-[#2b2c34] w-full shadow-[3px_3px_0px_#2b2c34]">
           {['match', 'round', 'league', 'ranking'].map((tab) => (
             <button key={tab} onClick={() => setActiveTab(tab)} className={`flex-1 px-1 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-1 ${activeTab === tab ? 'bg-[#ff5e3a] text-[#fffffe]' : 'text-[#2b2c34]/60'}`}>
@@ -385,7 +390,6 @@ export default function App() {
           ))}
         </div>
 
-        {/* JOGO ÚNICO */}
         {activeTab === 'match' && (
           <div className="space-y-4 animate-in">
             <section className="bg-[#fffffe] rounded-2xl shadow-[4px_4px_0px_#2b2c34] border-2 border-[#2b2c34] p-3">
@@ -419,13 +423,12 @@ export default function App() {
                 <div className="grid grid-cols-2 gap-2">
                   {[ {t: selectedHome, s: teams[selectedHome], icon: <Home className="w-3.5 h-3.5"/>}, {t: selectedAway, s: teams[selectedAway], icon: <MapPin className="w-3.5 h-3.5"/>} ].map((item, idx) => (
                     <div key={idx} className="bg-[#fffffe] p-2.5 rounded-xl border-2 border-[#2b2c34] shadow-[2px_2px_0px_#2b2c34]">
-                        <div className="flex items-center gap-1.5 mb-2"><span className="text-[#ff5e3a]">{item.icon}</span><span className="text-[11px] font-black uppercase truncate">{item.t}</span></div>
+                        <div className="flex items-center gap-1.5 mb-1.5"><span className="text-[#ff5e3a]">{item.icon}</span><span className="text-[11px] font-black uppercase truncate">{item.t}</span></div>
                         <div className="flex justify-between text-[11px] font-mono"><span className="text-[#2b2c34] font-black uppercase text-[9px]">ATQ:</span><span className="font-black text-[#ff5e3a]">{item.s?.attack.toFixed(2)}</span></div>
                         <div className="flex justify-between text-[11px] font-mono"><span className="text-[#2b2c34] font-black uppercase text-[9px]">DEF:</span><span className={`font-black ${item.s?.defense < 0 ? 'text-[#059669]' : 'text-[#e45858]'}`}>{item.s?.defense.toFixed(2)}</span></div>
                     </div>
                   ))}
                 </div>
-
                 <div className="grid grid-cols-3 gap-1.5">
                   {[
                     { label: selectedHome, val: simulationResult.probs.home, sub: `xG: ${simulationResult.expectedGoals.home.toFixed(2)}`, color: 'text-[#ff5e3a]', odd: calcOdd(simulationResult.probs.home) },
@@ -442,30 +445,24 @@ export default function App() {
                     </div>
                   ))}
                 </div>
-
                 <div className="bg-[#fffffe] rounded-2xl border-2 border-[#2b2c34] shadow-[4px_4px_0px_#2b2c34] p-2 sm:p-4">
                   <div className="flex flex-col gap-3 border-b-2 border-[#2b2c34]/5 pb-3 mb-4 px-2">
-                    <h4 className="font-black text-[#2b2c34] text-[11px] uppercase flex items-center gap-1.5 leading-none"><PieChart className="w-4 h-4 text-[#ff5e3a]" /> MATRIZ DE PRECISÃO</h4>
+                    <h4 className="font-black text-[#2b2c34] text-[11px] uppercase flex items-center gap-1.5 leading-none"><PieChart className="w-4 h-4 text-[#ff5e3a]" /> MATRIZ</h4>
                     <div className="flex gap-2">
                         <div className="flex-1 bg-[#f0f4f8] p-2 rounded-xl border-2 border-[#2b2c34] flex justify-between items-center px-3">
-                           <span className="text-[9.5px] font-black text-[#ff5e3a] uppercase">XPTS CASA</span>
+                           <span className="text-[9.5px] font-black text-[#ff5e3a] uppercase flex flex-col leading-none"><span>XPTS</span><span>CASA</span></span>
                            <span className="text-lg font-black">{simulationResult.expectedPointsHome.toFixed(2)}</span>
                         </div>
                         <div className="flex-1 bg-[#f0f4f8] p-2 rounded-xl border-2 border-[#2b2c34] flex justify-between items-center px-3">
-                           <span className="text-[9.5px] font-black text-blue-600 uppercase">XPTS FORA</span>
+                           <span className="text-[9.5px] font-black text-blue-600 uppercase flex flex-col leading-none"><span>XPTS</span><span>FORA</span></span>
                            <span className="text-lg font-black">{simulationResult.expectedPointsAway.toFixed(2)}</span>
                         </div>
                     </div>
                   </div>
-                  
                   <div className="flex flex-col items-center">
-                     <div className="mb-2.5 text-[9px] font-black text-[#ff5e3a] uppercase tracking-widest flex items-center gap-2">
-                        <MapPin className="w-3 h-3" /> VISITANTE →
-                     </div>
+                     <div className="mb-2.5 text-[9px] font-black text-[#ff5e3a] uppercase tracking-widest flex items-center gap-2"><MapPin className="w-3 h-3" /> VISITANTE →</div>
                      <div className="flex gap-2 w-full justify-center">
-                        <div className="[writing-mode:vertical-lr] rotate-180 text-[9px] font-black text-[#ff5e3a] uppercase tracking-widest flex items-center gap-2 shrink-0">
-                           <Home className="w-3 h-3" /> MANDANTE →
-                        </div>
+                        <div className="[writing-mode:vertical-lr] rotate-180 text-[9px] font-black text-[#ff5e3a] uppercase tracking-widest flex items-center gap-2 shrink-0"><Home className="w-3 h-3" /> MANDANTE →</div>
                         <div className="w-full max-w-[480px]">
                           <div className="grid grid-cols-7 gap-1">
                             <div className="col-span-1"></div>
@@ -493,7 +490,6 @@ export default function App() {
           </div>
         )}
 
-        {/* RODADA */}
         {activeTab === 'round' && (
           <div className="space-y-4 animate-in">
               <section className="bg-[#fffffe] rounded-2xl border-2 border-[#2b2c34] p-4 shadow-[4px_4px_0px_#2b2c34]">
@@ -503,7 +499,6 @@ export default function App() {
                           {Array.from({length: 38}).map((_, i) => <option key={i+1} value={i+1}>{i+1}</option>)}
                       </select>
                   </div>
-                  {/* BOTÃO RE-CALIBRADO - py-6 h-16 */}
                   <button onClick={handleSimulateRound} disabled={isSimulatingRound || !roundGamesData.length} className="w-full h-16 mb-5 py-6 bg-[#ff5e3a] text-[#fffffe] rounded-xl font-black text-[11px] uppercase shadow-[2px_2px_0px_#2b2c34] active:translate-y-[2px] active:shadow-none transition-all flex items-center justify-center gap-3">
                       {isSimulatingRound ? <Activity className="animate-spin w-5 h-5 mx-auto" /> : <><Play className="w-5 h-5 fill-current" /> SIMULAR RODADA</>}
                   </button>
@@ -553,13 +548,11 @@ export default function App() {
           </div>
         )}
 
-        {/* LIGA */}
         {activeTab === 'league' && (
           <div className="space-y-4 animate-in">
             <section className="bg-[#fffffe] rounded-2xl border-2 border-[#2b2c34] p-4 shadow-[4px_4px_0px_#2b2c34]">
               <div className="flex flex-col gap-3 mb-6 text-center">
                 <h3 className="font-black text-[#2b2c34] text-[13px] uppercase flex items-center justify-center gap-2 leading-none"><Trophy className="w-5 h-5 text-[#ff5e3a] fill-current" /> TEMPORADA 2026</h3>
-                {/* BOTÃO RE-CALIBRADO - py-6 h-16 */}
                 <button onClick={runLeagueSimulation} disabled={isSimulatingLeague || !leagueSchedule.length} className="w-full h-16 py-6 bg-[#ff5e3a] text-[#fffffe] rounded-xl font-black text-[11px] uppercase shadow-[2px_2px_0px_#2b2c34] active:translate-y-[2px] active:shadow-none transition-all">
                   {isSimulatingLeague ? <Activity className="animate-spin w-5 h-5 mx-auto" /> : "SIMULAR TEMPORADA"}
                 </button>
@@ -568,14 +561,14 @@ export default function App() {
                 <div className="overflow-x-hidden rounded-xl border-2 border-[#2b2c34]">
                   <table className="w-full text-left border-collapse table-fixed">
                     <thead className="bg-[#f0f4f8] text-[8.5px] font-black text-[#2b2c34] uppercase border-b-2 border-[#2b2c34] tracking-tighter">
-                      <tr><th className="px-1 py-3.5 w-6 text-center">#</th><th className="px-1.5 py-3.5 w-[28%]">EQUIPE</th><th className="px-1.5 py-3.5 text-center">XPTS</th><th className="px-1 py-3.5 text-center text-[#ff5e3a]">TIT</th><th className="px-1 py-3.5 text-center text-[#059669]">G6</th><th className="px-1 py-3.5 text-center text-[#e45858]">Z4</th></tr>
+                      <tr><th className="px-1 py-3.5 w-6 text-center">#</th><th className="px-1.5 py-3.5 w-[28%]">EQUIPE</th><th className="px-1 py-3.5 text-center">XPTS</th><th className="px-1 py-3.5 text-center text-[#ff5e3a]">TIT</th><th className="px-1 py-3.5 text-center text-[#059669]">G6</th><th className="px-1 py-3.5 text-center text-[#e45858]">Z4</th></tr>
                     </thead>
                     <tbody className="divide-y divide-[#2b2c34]/5 text-[11px] font-black text-[#2b2c34]">
                       {leagueTable.map((row, idx) => (
                         <tr key={row.name} className="hover:bg-[#ff5e3a]/5 transition-colors">
                           <td className="px-1 py-3 text-[#2b2c34]/40 text-center text-[9px]">{idx + 1}</td>
                           <td className="px-1.5 py-3 uppercase truncate max-w-[65px] leading-none">{row.name}</td>
-                          <td className="px-1.5 py-3 text-center font-mono bg-[#f0f4f8]/50 text-[12px]">{row.avgPoints.toFixed(1)}</td>
+                          <td className="px-1 py-3 text-center font-mono bg-[#f0f4f8]/50 text-[12px]">{row.avgPoints.toFixed(1)}</td>
                           <td className="px-1 py-3 text-center text-[#ff5e3a]">{row.titleProb > 0.05 ? `${row.titleProb.toFixed(1)}%` : '-'}</td>
                           <td className="px-1 py-3 text-center text-[#059669]">{row.libertaProb > 0.05 ? `${row.libertaProb.toFixed(1)}%` : '-'}</td>
                           <td className="px-1 py-3 text-center text-[#e45858]">{row.z4Prob > 0.05 ? `${row.z4Prob.toFixed(1)}%` : '-'}</td>
@@ -589,13 +582,12 @@ export default function App() {
           </div>
         )}
 
-        {/* RANKING */}
         {activeTab === 'ranking' && (
           <div className="space-y-4 animate-in">
              <section className="bg-[#fffffe] rounded-2xl shadow-[4px_4px_0px_#2b2c34] border-2 border-[#2b2c34] overflow-hidden">
                 <div className="p-4 bg-[#f0f4f8]/50 border-b-2 border-[#2b2c34]">
                     <div className="flex items-center justify-between mb-4">
-                        <h3 className="font-black text-[#2b2c34] text-[13px] uppercase leading-none">Power Ranking Técnico</h3>
+                        <h3 className="font-black text-[#2b2c34] text-[13px] uppercase leading-none">Power Ranking</h3>
                         <Award className="w-6 h-6 text-[#ff5e3a]" />
                     </div>
                     <div className="relative">
@@ -606,7 +598,7 @@ export default function App() {
                 <div className="overflow-x-hidden">
                   <table className="w-full text-left border-collapse table-fixed">
                     <thead className="bg-[#f0f4f8] text-[9px] font-black text-[#2b2c34] uppercase border-b-2 border-[#2b2c34]">
-                        <tr><th className="px-4 py-4 w-[45%]">Equipe</th><th className="px-1 py-4 text-center w-[27.5%]">Ataque</th><th className="px-1 py-4 text-center w-[27.5%]">Defesa</th></tr>
+                        <tr><th className="px-4 py-4 w-[45%]">Equipe</th><th className="px-1 py-4 text-center w-[27.5%]">Atq</th><th className="px-1 py-4 text-center w-[27.5%]">Def</th></tr>
                     </thead>
                     <tbody className="divide-y divide-[#2b2c34]/5">
                       {powerRanking.map((team, idx) => (
