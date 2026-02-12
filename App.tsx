@@ -81,13 +81,10 @@ const runMonteCarlo = (homeTeam, awayTeam, globalHfa, rho, iterations) => {
   const attA = (awayTeam?.attack || 0) / UI_SCALE_FACTOR;
   const defA = (awayTeam?.defense || 0) / UI_SCALE_FACTOR;
   const hfa_eff = ((globalHfa + (homeTeam?.hfa_raw || 0)) / 2);
-
   const lambdaH = Math.exp(attH + defA + hfa_eff);
   const lambdaA = Math.exp(attA + defH);
-
   let homeWins = 0, draws = 0, awayWins = 0;
   let scoreMatrix = Array(6).fill(0).map(() => Array(6).fill(0));
-
   for (let i = 1; i <= iterations; i++) {
     let hG = simulatePoisson(lambdaH);
     let aG = simulatePoisson(lambdaA);
@@ -99,7 +96,6 @@ const runMonteCarlo = (homeTeam, awayTeam, globalHfa, rho, iterations) => {
     scoreMatrix[cH][cA]++;
     if (hG > aG) homeWins++; else if (aG > hG) awayWins++; else draws++;
   }
-
   return {
     probs: { home: (homeWins / iterations) * 100, draw: (draws / iterations) * 100, away: (awayWins / iterations) * 100 },
     matrix: scoreMatrix.map(row => row.map(count => (count / iterations) * 100)),
@@ -128,12 +124,10 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [metrics, setMetrics] = useState({ dataCount: 0, avgGoals: 0 });
-  
   const [selectedHome, setSelectedHome] = useState('');
   const [selectedAway, setSelectedAway] = useState('');
   const [simulationResult, setSimulationResult] = useState(null);
   const [isSimulating, setIsSimulating] = useState(false);
-  
   const [leagueSchedule, setLeagueSchedule] = useState([]);
   const [leagueTable, setLeagueTable] = useState([]);
   const [isSimulatingLeague, setIsSimulatingLeague] = useState(false);
@@ -228,7 +222,6 @@ export default function App() {
       const att_zeroed = finalTeams[n].attack_raw - avgAtt, def_zeroed = finalTeams[n].defense_raw - avgDef;
       finalTeams[n].attack = Math.max(-MAX_RATING, Math.min(MAX_RATING, att_zeroed * UI_SCALE_FACTOR));
       finalTeams[n].defense = Math.max(-MAX_RATING, Math.min(MAX_RATING, def_zeroed * UI_SCALE_FACTOR));
-      finalTeams[n].hfa_raw = finalTeams[n].hfa_raw;
     });
     setTeams(finalTeams);
     setGlobalParams({ hfa: finalModel.hfa, rho: finalModel.rho, xi: bestXi });
@@ -302,30 +295,20 @@ export default function App() {
             hG = res.hG; aG = res.aG;
           }
           if (currentStandings.hasOwnProperty(match.home) && currentStandings.hasOwnProperty(match.away)) {
-            if (hG > aG) currentStandings[match.home] += 3;
-            else if (aG > hG) currentStandings[match.away] += 3;
-            else { currentStandings[match.home] += 1; currentStandings[match.away] += 1; }
+            if (hG > aG) currentStandings[match.home] += 3; else if (aG > hG) currentStandings[match.away] += 3; else { currentStandings[match.home] += 1; currentStandings[match.away] += 1; }
           }
         });
         const sorted = Object.entries(currentStandings).sort(([,a], [,b]) => b - a);
         sorted.forEach(([team, pts], rank) => {
           if (stats[team]) {
             stats[team].simPoints += pts;
-            if (rank === 0) stats[team].title++;
-            if (rank < 6) stats[team].liberta++;
-            if (rank < 8) stats[team].preLiberta++;
-            if (rank < 12) stats[team].sula++;
-            if (rank >= sorted.length - 4) stats[team].z4++;
+            if (rank === 0) stats[team].title++; if (rank < 6) stats[team].liberta++; if (rank < 8) stats[team].preLiberta++; if (rank < 12) stats[team].sula++; if (rank >= sorted.length - 4) stats[team].z4++;
           }
         });
       }
       setLeagueTable(Object.entries(stats).map(([name, s]) => ({
         name, avgPoints: s.simPoints / LEAGUE_SIM_COUNT,
-        titleProb: (s.title / LEAGUE_SIM_COUNT) * 100,
-        libertaProb: (s.liberta / LEAGUE_SIM_COUNT) * 100,
-        preLibertaProb: (s.preLiberta / LEAGUE_SIM_COUNT) * 100,
-        sulaProb: (s.sula / LEAGUE_SIM_COUNT) * 100,
-        z4Prob: (s.z4 / LEAGUE_SIM_COUNT) * 100
+        titleProb: (s.title / LEAGUE_SIM_COUNT) * 100, libertaProb: (s.liberta / LEAGUE_SIM_COUNT) * 100, preLibertaProb: (s.preLiberta / LEAGUE_SIM_COUNT) * 100, sulaProb: (s.sula / LEAGUE_SIM_COUNT) * 100, z4Prob: (s.z4 / LEAGUE_SIM_COUNT) * 100
       })).sort((a, b) => b.avgPoints - a.avgPoints));
       setIsSimulatingLeague(false);
     }, 100);
@@ -334,10 +317,7 @@ export default function App() {
   const handleSimulateMatch = () => {
     if (!selectedHome || !selectedAway) return;
     setIsSimulating(true);
-    setTimeout(() => {
-      setSimulationResult(runMonteCarlo(teams[selectedHome], teams[selectedAway], globalParams.hfa, globalParams.rho, SIMULATION_COUNT));
-      setIsSimulating(false);
-    }, 400);
+    setTimeout(() => { setSimulationResult(runMonteCarlo(teams[selectedHome], teams[selectedAway], globalParams.hfa, globalParams.rho, SIMULATION_COUNT)); setIsSimulating(false); }, 400);
   };
 
   const handleResetMatch = () => { setSelectedHome(''); setSelectedAway(''); setSimulationResult(null); };
@@ -347,9 +327,7 @@ export default function App() {
     setIsSimulatingRound(true);
     setTimeout(() => {
         const results = {};
-        roundGamesData.forEach(m => {
-            if (teams[m.home] && teams[m.away]) results[`${m.home}-${m.away}`] = runMonteCarlo(teams[m.home], teams[m.away], globalParams.hfa, globalParams.rho, 10000);
-        });
+        roundGamesData.forEach(m => { if (teams[m.home] && teams[m.away]) results[`${m.home}-${m.away}`] = runMonteCarlo(teams[m.home], teams[m.away], globalParams.hfa, globalParams.rho, 10000); });
         setRoundResults(results);
         setIsSimulatingRound(false);
     }, 200);
@@ -360,168 +338,146 @@ export default function App() {
 
   if (loading) return (
     <div className="min-h-screen bg-[#f0f4f8] flex flex-col items-center justify-center text-[#2b2c34] p-4 text-center font-roboto">
-      <Activity className="w-12 h-12 text-[#ff5e3a] animate-pulse mb-4" />
-      <h2 className="text-xl font-black uppercase tracking-tighter leading-tight">Sincronizando Modelos...</h2>
-      <p className="text-[#2b2c34]/60 text-[10px] mt-4 font-mono uppercase tracking-[0.2em]">Otimizando via WMLE | Backtesting Ativo</p>
+      <Activity className="w-10 h-10 text-[#ff5e3a] animate-pulse mb-4" />
+      <h2 className="text-lg font-black uppercase tracking-tighter leading-tight">Sincronizando Modelos...</h2>
     </div>
   );
 
   return (
-    <div className="min-h-screen bg-[#f0f4f8] font-roboto text-[#2b2c34] pb-12">
+    <div className="min-h-screen bg-[#f0f4f8] font-roboto text-[#2b2c34] pb-8 overflow-x-hidden">
       <style dangerouslySetInnerHTML={{ __html: `
         @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;700;900&display=swap');
         .font-roboto { font-family: 'Roboto', sans-serif; }
-        .custom-scrollbar::-webkit-scrollbar { width: 4px; height: 4px; }
-        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: #ff5e3a33; border-radius: 10px; }
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
         @keyframes fade-in { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
-        .animate-in { animation: fade-in 0.5s ease-out; }
+        .animate-in { animation: fade-in 0.4s ease-out; }
       `}} />
 
-      {/* HEADER VIBRANT SUNSET & ICE */}
-      <nav className="bg-[#fffffe] border-b-2 border-[#2b2c34] sticky top-0 z-50 px-4 py-3 flex justify-between items-center shadow-lg">
+      {/* HEADER COMPACTO */}
+      <nav className="bg-[#fffffe] border-b-2 border-[#2b2c34] sticky top-0 z-50 px-3 py-2 flex justify-between items-center shadow-md">
         <div className="flex items-center gap-2">
-          <div className="bg-[#ff5e3a] p-1.5 rounded-lg shrink-0 shadow-[4px_4px_0px_#2b2c34]"><Target className="text-[#fffffe] w-5 h-5" /></div>
+          <div className="bg-[#ff5e3a] p-1 rounded-md shadow-[2px_2px_0px_#2b2c34]"><Target className="text-[#fffffe] w-4 h-4" /></div>
           <div>
-            <h1 className="text-sm font-black tracking-tight uppercase leading-none text-[#2b2c34]">Dixon-Coles Pro</h1>
-            <p className="text-[11px] font-black text-[#ff8906] uppercase mt-1 italic">XI: {globalParams.xi.toFixed(4)}</p>
+            <h1 className="text-[11px] font-black tracking-tight uppercase leading-none">Dixon-Coles Pro</h1>
+            <p className="text-[8px] font-bold text-[#ff8906] uppercase mt-0.5">XI: {globalParams.xi.toFixed(4)}</p>
           </div>
         </div>
         
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
           {modelAccuracy && (
-            <div className="flex flex-col items-end border-r-2 border-[#2b2c34]/10 pr-3">
-                <span className="text-[8px] font-black text-[#2b2c34]/70 uppercase leading-none">Backtesting</span>
-                <span className="text-[13px] font-black text-[#059669] tracking-tight leading-tight">{modelAccuracy}% Precision</span>
+            <div className="flex flex-col items-end border-r border-[#2b2c34]/10 pr-2">
+                <span className="text-[7px] font-black text-[#2b2c34]/70 uppercase">Backtesting</span>
+                <span className="text-[10px] font-black text-[#059669] tracking-tighter">{modelAccuracy}%</span>
             </div>
           )}
-          <button onClick={fetchAllData} className="p-2 bg-[#f0f4f8] hover:bg-[#ff5e3a] group rounded-full border-2 border-[#2b2c34] transition-colors"><RefreshCw className="w-4 h-4 text-[#2b2c34] group-hover:text-[#fffffe]" /></button>
+          <button onClick={fetchAllData} className="p-1.5 bg-[#f0f4f8] rounded-full border-2 border-[#2b2c34]"><RefreshCw className="w-3.5 h-3.5" /></button>
         </div>
       </nav>
 
-      <main className="max-w-3xl mx-auto p-3 sm:p-4 space-y-6">
-        {/* TABS NEO-BRUTALIST - FONT INCREASED */}
-        <div className="flex flex-row overflow-x-auto gap-2 p-1.5 bg-[#fffffe] rounded-2xl border-2 border-[#2b2c34] w-full shadow-[6px_6px_0px_#2b2c34] no-scrollbar">
+      <main className="max-w-3xl mx-auto p-2 space-y-4">
+        {/* TAB NAVIGATION - FIT MOBILE WIDTH */}
+        <div className="flex flex-row gap-1 p-1 bg-[#fffffe] rounded-xl border-2 border-[#2b2c34] w-full shadow-[3px_3px_0px_#2b2c34]">
           {['match', 'round', 'league', 'ranking'].map((tab) => (
-            <button key={tab} onClick={() => setActiveTab(tab)} className={`flex-1 whitespace-nowrap px-4 py-3 rounded-xl text-[12px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${activeTab === tab ? 'bg-[#ff5e3a] text-[#fffffe] shadow-[2px_2px_0px_#2b2c34]' : 'text-[#2b2c34] hover:text-[#ff5e3a]'}`}>
-              {tab === 'match' && <Zap className="w-4 h-4" />}
-              {tab === 'round' && <Calendar className="w-4 h-4" />}
-              {tab === 'league' && <TableIcon className="w-4 h-4" />}
-              {tab === 'ranking' && <ListOrdered className="w-4 h-4" />}
-              {tab.charAt(0).toUpperCase() + tab.slice(1)}
+            <button key={tab} onClick={() => setActiveTab(tab)} className={`flex-1 px-1 py-2 rounded-lg text-[8.5px] font-black uppercase tracking-tighter transition-all flex items-center justify-center gap-1 ${activeTab === tab ? 'bg-[#ff5e3a] text-[#fffffe]' : 'text-[#2b2c34]/60'}`}>
+              {tab === 'match' && <Zap className="w-2.5 h-2.5" />}
+              {tab === 'round' && <Calendar className="w-2.5 h-2.5" />}
+              {tab === 'league' && <TableIcon className="w-2.5 h-2.5" />}
+              {tab === 'ranking' && <ListOrdered className="w-2.5 h-2.5" />}
+              {tab === 'match' ? 'JOGO' : tab === 'round' ? 'RODADA' : tab === 'league' ? 'LIGA' : 'RANKING'}
             </button>
           ))}
         </div>
 
-        {/* JOGO ÚNICO */}
+        {/* JOGO ÚNICO - BOXES RE-CALIBRADOS */}
         {activeTab === 'match' && (
-          <div className="space-y-6 animate-in">
-            <section className="bg-[#fffffe] rounded-[2rem] shadow-[8px_8px_0px_#2b2c34] border-2 border-[#2b2c34] overflow-hidden">
-              <div className="p-6">
-                <div className="flex flex-col gap-3">
+          <div className="space-y-4 animate-in">
+            <section className="bg-[#fffffe] rounded-2xl shadow-[4px_4px_0px_#2b2c34] border-2 border-[#2b2c34] p-3">
+              <div className="flex flex-col gap-3">
+                  <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
                     <div className="space-y-1">
-                      <label className="text-[11px] font-black text-[#2b2c34] uppercase tracking-[0.2em] ml-2 leading-none">Mandante</label>
-                      <select value={selectedHome} onChange={(e) => setSelectedHome(e.target.value)} className="w-full bg-[#f0f4f8] border-2 border-[#2b2c34] rounded-2xl p-3 font-bold text-sm outline-none appearance-none leading-tight focus:bg-[#fffffe] transition-all text-[#2b2c34]">
-                        <option value="">Selecionar...</option>
+                      <label className="text-[8px] font-black text-[#2b2c34]/50 uppercase ml-1">Mandante</label>
+                      <select value={selectedHome} onChange={(e) => setSelectedHome(e.target.value)} className="w-full bg-[#f0f4f8] border-2 border-[#2b2c34] rounded-lg p-1.5 font-bold text-[11px] outline-none text-[#2b2c34]">
+                        <option value="">Escolher...</option>
                         {Object.keys(teams).sort().map(t => <option key={t} value={t}>{t}</option>)}
                       </select>
                     </div>
-                    <div className="flex justify-center text-[#ff5e3a] text-lg font-black italic leading-none py-1">VS</div>
+                    <div className="text-[#ff5e3a] text-[10px] font-black italic pt-3">VS</div>
                     <div className="space-y-1">
-                      <label className="text-[11px] font-black text-[#2b2c34] uppercase tracking-[0.2em] ml-2 block leading-none">Visitante</label>
-                      <select value={selectedAway} onChange={(e) => setSelectedAway(e.target.value)} className="w-full bg-[#f0f4f8] border-2 border-[#2b2c34] rounded-2xl p-3 font-bold text-sm outline-none appearance-none leading-tight focus:bg-[#fffffe] transition-all text-[#2b2c34]">
-                        <option value="">Selecionar...</option>
+                      <label className="text-[8px] font-black text-[#2b2c34]/50 uppercase ml-1">Visitante</label>
+                      <select value={selectedAway} onChange={(e) => setSelectedAway(e.target.value)} className="w-full bg-[#f0f4f8] border-2 border-[#2b2c34] rounded-lg p-1.5 font-bold text-[11px] outline-none text-[#2b2c34]">
+                        <option value="">Escolher...</option>
                         {Object.keys(teams).sort().map(t => <option key={t} value={t}>{t}</option>)}
                       </select>
                     </div>
-                </div>
-                <div className="mt-8 flex gap-3">
-                  <button onClick={handleSimulateMatch} disabled={isSimulating || !selectedHome || !selectedAway || selectedHome === selectedAway} className="flex-1 h-16 rounded-2xl font-black text-[#fffffe] uppercase tracking-[0.2em] bg-[#ff5e3a] hover:bg-[#ff5e3a]/90 transition-all active:scale-[0.98] disabled:opacity-30 flex items-center justify-center gap-3 text-xs shadow-[4px_4px_0px_#2b2c34]">
-                    {isSimulating ? <Activity className="animate-spin w-5 h-5" /> : <Play className="fill-current w-4 h-4" />} PREVISÃO
-                  </button>
-                  <button onClick={handleResetMatch} className="py-4 px-6 rounded-2xl bg-[#fffffe] hover:bg-[#f0f4f8] text-[#2b2c34] transition-all border-2 border-[#2b2c34] shadow-[4px_4px_0px_#2b2c34] flex items-center justify-center" title="Limpar"><Trash2 className="w-5 h-5" /></button>
-                </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <button onClick={handleSimulateMatch} disabled={isSimulating || !selectedHome || !selectedAway || selectedHome === selectedAway} className="flex-1 py-3 rounded-xl font-black text-[#fffffe] uppercase text-[10px] bg-[#ff5e3a] shadow-[2px_2px_0px_#2b2c34] disabled:opacity-30">PREVISÃO</button>
+                    <button onClick={handleResetMatch} className="p-3 rounded-xl border-2 border-[#2b2c34] bg-[#fffffe]"><Trash2 className="w-4 h-4" /></button>
+                  </div>
               </div>
             </section>
 
             {simulationResult && (
-              <div className="space-y-6 animate-in slide-in-from-bottom-4 duration-500">
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="bg-[#fffffe] p-4 rounded-3xl border-2 border-[#2b2c34] shadow-[4px_4px_0px_#2b2c34]">
-                      <div className="flex items-center gap-2 mb-3">
-                          <Home className="w-4 h-4 text-[#ff5e3a] shrink-0" />
-                          <span className="text-[11px] font-black uppercase text-[#2b2c34] truncate">{selectedHome}</span>
-                      </div>
-                      <div className="flex justify-between items-center mb-1.5 leading-none text-[13px] font-mono"><span className="text-[#2b2c34] font-black uppercase text-[11px]">ATQ:</span><span className="font-black text-[#ff5e3a]">{teams[selectedHome]?.attack.toFixed(2)}</span></div>
-                      <div className="flex justify-between items-center leading-none text-[13px] font-mono"><span className="text-[#2b2c34] font-black uppercase text-[11px]">DEF:</span><span className={`font-black ${teams[selectedHome]?.defense < 0 ? 'text-[#059669]' : 'text-[#e45858]'}`}>{teams[selectedHome]?.defense.toFixed(2)}</span></div>
-                  </div>
-                  <div className="bg-[#fffffe] p-4 rounded-3xl border-2 border-[#2b2c34] shadow-[4px_4px_0px_#2b2c34] text-right">
-                      <div className="flex items-center gap-2 mb-3 justify-end">
-                          <span className="text-[11px] font-black uppercase text-[#2b2c34] truncate">{selectedAway}</span>
-                          <MapPin className="w-4 h-4 text-[#ff5e3a] shrink-0" />
-                      </div>
-                      <div className="flex justify-between items-center mb-1.5 leading-none text-[13px] font-mono"><span className="text-[#2b2c34] font-black uppercase text-[11px]">ATQ:</span><span className="font-black text-[#ff5e3a]">{teams[selectedAway]?.attack.toFixed(2)}</span></div>
-                      <div className="flex justify-between items-center leading-none text-[13px] font-mono"><span className="text-[#2b2c34] font-black uppercase text-[11px]">DEF:</span><span className={`font-black ${teams[selectedAway]?.defense < 0 ? 'text-[#059669]' : 'text-[#e45858]'}`}>{teams[selectedAway]?.defense.toFixed(2)}</span></div>
-                  </div>
+              <div className="space-y-4 animate-in">
+                <div className="grid grid-cols-2 gap-2">
+                  {[ {t: selectedHome, s: teams[selectedHome], icon: <Home className="w-3 h-3"/>}, {t: selectedAway, s: teams[selectedAway], icon: <MapPin className="w-3 h-3"/>} ].map((item, idx) => (
+                    <div key={idx} className="bg-[#fffffe] p-2.5 rounded-xl border-2 border-[#2b2c34] shadow-[2px_2px_0px_#2b2c34]">
+                        <div className="flex items-center gap-1.5 mb-1.5"><span className="text-[#ff5e3a]">{item.icon}</span><span className="text-[10px] font-black uppercase truncate">{item.t}</span></div>
+                        <div className="flex justify-between text-[10px] font-mono"><span className="text-[#2b2c34] font-black uppercase text-[8px]">ATQ:</span><span className="font-black text-[#ff5e3a]">{item.s?.attack.toFixed(2)}</span></div>
+                        <div className="flex justify-between text-[10px] font-mono"><span className="text-[#2b2c34] font-black uppercase text-[8px]">DEF:</span><span className={`font-black ${item.s?.defense < 0 ? 'text-[#059669]' : 'text-[#e45858]'}`}>{item.s?.defense.toFixed(2)}</span></div>
+                    </div>
+                  ))}
                 </div>
 
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-3 gap-1.5">
                   {[
                     { label: selectedHome, val: simulationResult.probs.home, sub: `xG: ${simulationResult.expectedGoals.home.toFixed(2)}`, color: 'text-[#ff5e3a]', odd: calcOdd(simulationResult.probs.home) },
-                    { label: 'Empate', val: simulationResult.probs.draw, sub: '---', color: 'text-[#2b2c34]', odd: calcOdd(simulationResult.probs.draw) },
+                    { label: 'Empate', val: simulationResult.probs.draw, sub: '', color: 'text-[#2b2c34]', odd: calcOdd(simulationResult.probs.draw) },
                     { label: selectedAway, val: simulationResult.probs.away, sub: `xG: ${simulationResult.expectedGoals.away.toFixed(2)}`, color: 'text-blue-600', odd: calcOdd(simulationResult.probs.away) }
                   ].map((item, i) => (
-                    <div key={i} className="bg-[#fffffe] p-4 rounded-[2rem] border-2 border-[#2b2c34] shadow-[4px_4px_0px_#2b2c34] text-center">
-                      <p className="text-[10px] font-black text-[#2b2c34] uppercase mb-2 truncate tracking-widest leading-none">{item.label}</p>
-                      <h3 className={`text-2xl font-black ${item.color} tabular-nums leading-none`}>{item.val.toFixed(1)}%</h3>
-                      <div className="mt-3 flex flex-col gap-1.5 leading-none">
-                        <span className="text-[11px] font-black text-[#2b2c34] bg-[#f0f4f8] px-2 py-1 rounded-full uppercase border-2 border-[#2b2c34]">ODD: {item.odd}</span>
-                        {item.sub !== '---' && <span className="text-[10px] font-black text-[#2b2c34] uppercase italic bg-[#ff8906]/10 px-1 py-0.5 rounded">{item.sub}</span>}
+                    <div key={i} className="bg-[#fffffe] p-2 rounded-xl border-2 border-[#2b2c34] shadow-[2px_2px_0px_#2b2c34] text-center">
+                      <p className="text-[7.5px] font-black text-[#2b2c34] uppercase truncate mb-1">{item.label}</p>
+                      <h3 className={`text-sm font-black ${item.color} leading-none`}>{item.val.toFixed(1)}%</h3>
+                      <div className="mt-2 flex flex-col gap-0.5">
+                        <span className="text-[7.5px] font-black text-[#2b2c34] bg-[#f0f4f8] py-0.5 rounded-full border border-[#2b2c34]/10">ODD: {item.odd}</span>
+                        {item.sub && <span className="text-[7px] font-black text-[#2b2c34]/70 uppercase italic bg-[#ff8906]/10 px-0.5 rounded">{item.sub}</span>}
                       </div>
                     </div>
                   ))}
                 </div>
 
-                <div className="bg-[#fffffe] rounded-[2.5rem] border-2 border-[#2b2c34] shadow-[8px_8px_0px_#2b2c34] p-6">
-                  <div className="flex flex-col sm:flex-row justify-between items-center mb-6 gap-4 border-b-2 border-[#2b2c34]/5 pb-6">
-                    <h4 className="font-black text-[#2b2c34] text-[13px] uppercase tracking-[0.2em] flex items-center gap-2"><PieChart className="w-5 h-5 text-[#ff5e3a]" /> MATRIZ DE PROBABILIDADES</h4>
-                    <div className="flex gap-4 w-full sm:w-auto">
-                        <div className="flex-1 bg-[#f0f4f8] px-4 py-2.5 rounded-2xl border-2 border-[#2b2c34] text-center leading-none flex flex-row items-center gap-3">
-                           <span className="text-[10px] font-black text-[#ff5e3a] uppercase block text-left">XPTS<br/>CASA</span>
-                           <span className="text-xl font-black text-[#2b2c34] tabular-nums">{simulationResult.expectedPointsHome.toFixed(2)}</span>
+                <div className="bg-[#fffffe] rounded-2xl border-2 border-[#2b2c34] shadow-[4px_4px_0px_#2b2c34] p-3">
+                  <div className="flex flex-col gap-2 border-b-2 border-[#2b2c34]/5 pb-2 mb-3">
+                    <h4 className="font-black text-[#2b2c34] text-[10px] uppercase flex items-center gap-1.5"><PieChart className="w-3.5 h-3.5 text-[#ff5e3a]" /> MATRIZ DE PRECISÃO</h4>
+                    <div className="flex gap-2">
+                        <div className="flex-1 bg-[#f0f4f8] p-1.5 rounded-lg border-2 border-[#2b2c34] flex justify-between items-center">
+                           <span className="text-[6.5px] font-black text-[#ff5e3a] uppercase leading-none">XPTS<br/>CASA</span>
+                           <span className="text-xs font-black">{simulationResult.expectedPointsHome.toFixed(2)}</span>
                         </div>
-                        <div className="flex-1 bg-[#f0f4f8] px-4 py-2.5 rounded-2xl border-2 border-[#2b2c34] text-center leading-none flex flex-row items-center gap-3">
-                           <span className="text-[10px] font-black text-blue-600 uppercase block text-left">XPTS<br/>FORA</span>
-                           <span className="text-xl font-black text-[#2b2c34] tabular-nums">{simulationResult.expectedPointsAway.toFixed(2)}</span>
+                        <div className="flex-1 bg-[#f0f4f8] p-1.5 rounded-lg border-2 border-[#2b2c34] flex justify-between items-center">
+                           <span className="text-[6.5px] font-black text-blue-600 uppercase leading-none">XPTS<br/>FORA</span>
+                           <span className="text-xs font-black">{simulationResult.expectedPointsAway.toFixed(2)}</span>
                         </div>
                     </div>
                   </div>
-                  
-                  <div className="flex flex-col items-center overflow-x-auto no-scrollbar">
-                     <div className="mb-4 text-[10px] font-black text-[#ff5e3a] uppercase tracking-[0.5em]">VISITANTE →</div>
-                     <div className="flex gap-2 w-full justify-center">
-                        <div className="[writing-mode:vertical-lr] rotate-180 text-[10px] font-black text-[#ff5e3a] uppercase tracking-[0.5em]">MANDANTE →</div>
-                        <div className="w-full max-w-[480px]">
-                          <div className="grid grid-cols-7 gap-1">
-                            <div className="col-span-1"></div>
-                            {Array.from({length: 6}).map((_, i) => <div key={i} className="text-center text-[12px] font-black text-[#2b2c34]/50">{i}</div>)}
-                            {simulationResult.matrix.map((row, hS) => (
-                              <React.Fragment key={hS}>
-                                <div className="flex items-center justify-end pr-3 text-[12px] font-black text-[#2b2c34]/50">{hS}</div>
-                                {row.map((prob, aS) => {
-                                  const intensity = Math.min(prob * 10, 100);
-                                  return (
-                                    <div key={aS} className="aspect-square rounded-lg flex items-center justify-center border-2 border-[#2b2c34]/5 transition-transform hover:scale-105" style={{ backgroundColor: `rgba(255, 94, 58, ${intensity / 100})`, color: intensity > 40 ? '#fffffe' : '#2b2c34' }}>
-                                      <span className="text-[11px] sm:text-[14px] font-black tabular-nums">{prob.toFixed(1)}%</span>
-                                    </div>
-                                  );
-                                })}
-                              </React.Fragment>
-                            ))}
-                          </div>
-                        </div>
+                  <div className="flex flex-col items-center">
+                     <div className="grid grid-cols-7 gap-0.5 w-full max-w-[320px]">
+                        <div className="col-span-1"></div>
+                        {Array.from({length: 6}).map((_, i) => <div key={i} className="text-center text-[10px] font-black text-[#2b2c34]/50">{i}</div>)}
+                        {simulationResult.matrix.map((row, hS) => (
+                          <React.Fragment key={hS}>
+                            <div className="flex items-center justify-end pr-1 text-[10px] font-black text-[#2b2c34]/50">{hS}</div>
+                            {row.map((prob, aS) => {
+                              const intensity = Math.min(prob * 10, 100);
+                              return (
+                                <div key={aS} className="aspect-square rounded-sm flex items-center justify-center border border-[#2b2c34]/5" style={{ backgroundColor: `rgba(255, 94, 58, ${intensity / 100})`, color: intensity > 40 ? '#fffffe' : '#2b2c34' }}>
+                                  <span className="text-[7.5px] font-black tabular-nums">{prob.toFixed(1)}%</span>
+                                </div>
+                              );
+                            })}
+                          </React.Fragment>
+                        ))}
                      </div>
                   </div>
                 </div>
@@ -530,138 +486,125 @@ export default function App() {
           </div>
         )}
 
-        {/* RODADA */}
+        {/* RODADA - JÁ OTIMIZADA */}
         {activeTab === 'round' && (
-          <div className="space-y-6 animate-in">
-              <section className="bg-[#fffffe] rounded-[2.5rem] border-2 border-[#2b2c34] p-6 md:p-10 shadow-[8px_8px_0px_#2b2c34]">
-                  <div className="flex flex-col sm:flex-row items-center justify-between mb-8 gap-4">
-                      <h3 className="font-black text-[#2b2c34] text-lg uppercase tracking-tight flex items-center gap-2 leading-none text-center sm:text-left"><Calendar className="w-5 h-5 text-[#ff5e3a]" /> RODADA ATUAL</h3>
-                      <div className="flex items-center gap-3 w-full sm:w-auto">
-                          <span className="text-[11px] font-black text-[#2b2c34] uppercase tracking-widest">JORNADA</span>
-                          <select value={selectedRound} onChange={(e) => { setSelectedRound(Number(e.target.value)); setRoundResults({}); }} className="flex-1 sm:flex-none bg-[#f0f4f8] border-2 border-[#2b2c34] rounded-xl px-4 py-2.5 font-bold text-sm outline-none focus:bg-[#fffffe] text-[#2b2c34]">
-                              {Array.from({length: 38}).map((_, i) => <option key={i+1} value={i+1}>{i+1}</option>)}
-                          </select>
-                      </div>
+          <div className="space-y-4 animate-in">
+              <section className="bg-[#fffffe] rounded-2xl border-2 border-[#2b2c34] p-4 shadow-[4px_4px_0px_#2b2c34]">
+                  <div className="flex items-center justify-between mb-4">
+                      <h3 className="font-black text-[#2b2c34] text-[11px] uppercase flex items-center gap-1.5"><Calendar className="w-4 h-4 text-[#ff5e3a]" /> RODADA ATUAL</h3>
+                      <select value={selectedRound} onChange={(e) => { setSelectedRound(Number(e.target.value)); setRoundResults({}); }} className="bg-[#f0f4f8] border-2 border-[#2b2c34] rounded-lg px-2 py-1 font-bold text-[10px] outline-none">
+                          {Array.from({length: 38}).map((_, i) => <option key={i+1} value={i+1}>{i+1}</option>)}
+                      </select>
                   </div>
-
-                  <button onClick={handleSimulateRound} disabled={isSimulatingRound || !roundGamesData.length} className="w-full h-16 mb-8 py-5 bg-[#ff5e3a] hover:bg-[#ff5e3a]/90 text-[#fffffe] rounded-2xl font-black text-xs uppercase tracking-[0.2em] transition-all flex items-center justify-center gap-4 shadow-[4px_4px_0px_#2b2c34]">
-                      {isSimulatingRound ? <Activity className="animate-spin w-5 h-5" /> : <Play className="w-5 h-5 fill-current" />} SIMULAR RODADA
+                  <button onClick={handleSimulateRound} disabled={isSimulatingRound || !roundGamesData.length} className="w-full mb-4 py-4 bg-[#ff5e3a] text-[#fffffe] rounded-xl font-black text-[10px] uppercase shadow-[2px_2px_0px_#2b2c34] flex items-center justify-center gap-2">
+                      {isSimulatingRound ? <Activity className="animate-spin w-4 h-4" /> : "SIMULAR RODADA"}
                   </button>
-
-                  <div className="grid grid-cols-1 gap-4">
-                      {roundGamesData.length > 0 ? roundGamesData.map((m, idx) => {
+                  <div className="grid grid-cols-1 gap-2.5">
+                      {roundGamesData.map((m, idx) => {
                           const result = roundResults[`${m.home}-${m.away}`];
                           return (
-                              <div key={idx} className="bg-[#f0f4f8]/80 rounded-3xl p-5 border-2 border-[#2b2c34] flex items-center justify-between group hover:bg-[#fffffe] transition-all relative overflow-hidden">
-                                  <div className="flex-1 text-left flex flex-col gap-1.5 pr-2">
-                                      <p className="font-black text-[#2b2c34] uppercase leading-none truncate w-full" style={{ fontSize: 'clamp(11px, 3.2vw, 15px)' }}>{m.home}</p>
+                              <div key={idx} className="bg-[#f0f4f8]/60 rounded-xl p-3 border-2 border-[#2b2c34] flex items-center justify-between relative overflow-hidden">
+                                  <div className="flex-1 text-left min-w-0 pr-1">
+                                      <p className="font-black text-[#2b2c34] uppercase truncate text-[10px] sm:text-xs leading-none mb-0.5">{m.home}</p>
                                       {result ? (
                                           <>
-                                              <p className="text-[15px] sm:text-xl font-black text-[#ff5e3a] leading-none">{result.probs.home.toFixed(1)}%</p>
-                                              <div className="flex flex-col leading-tight mt-1 text-[11px] text-[#2b2c34] font-black uppercase italic">
+                                              <p className="text-[12px] font-black text-[#ff5e3a]">{result.probs.home.toFixed(1)}%</p>
+                                              <div className="flex flex-col text-[8px] text-[#2b2c34] font-black uppercase italic leading-tight">
                                                   <span>XG: {result.expectedGoals.home.toFixed(2)}</span>
                                                   <span>ODD: {calcOdd(result.probs.home)}</span>
                                               </div>
                                           </>
-                                      ) : <p className="text-[10px] text-[#2b2c34] font-black uppercase italic">Pendente</p>}
+                                      ) : <p className="text-[8px] text-[#2b2c34]/30 font-black uppercase italic">Pendente</p>}
                                   </div>
-
-                                  <div className="flex flex-col items-center px-2 shrink-0 z-10">
-                                      <div className="text-[10px] font-black text-[#2b2c34] italic mb-2 tracking-widest opacity-30">VS</div>
+                                  <div className="flex flex-col items-center px-1 shrink-0">
                                       {result && (
-                                        <div className="bg-[#2b2c34] px-4 py-2.5 rounded-xl flex flex-col items-center shadow-xl min-w-[65px] border-2 border-[#2b2c34]">
-                                            <span className="text-[7.5px] font-black text-[#fffffe]/70 uppercase leading-none mb-1 tracking-tighter">EMPATE</span>
-                                            <span className="text-[15px] sm:text-lg font-black text-[#fffffe] leading-none tabular-nums">{result.probs.draw.toFixed(0)}%</span>
+                                        <div className="bg-[#2b2c34] px-2 py-1 rounded-md flex flex-col items-center min-w-[45px]">
+                                            <span className="text-[6px] font-black text-[#fffffe]/70 uppercase leading-none mb-1">EMPATE</span>
+                                            <span className="text-[11px] font-black text-[#fffffe] tabular-nums">{result.probs.draw.toFixed(0)}%</span>
                                         </div>
                                       )}
+                                      {!result && <div className="text-[8px] font-black opacity-10 italic">VS</div>}
                                   </div>
-
-                                  <div className="flex-1 text-right flex flex-col items-end gap-1.5 pl-2">
-                                      <p className="font-black text-[#2b2c34] uppercase leading-none truncate w-full" style={{ fontSize: 'clamp(11px, 3.2vw, 15px)' }}>{m.away}</p>
+                                  <div className="flex-1 text-right min-w-0 pl-1">
+                                      <p className="font-black text-[#2b2c34] uppercase truncate text-[10px] sm:text-xs leading-none mb-0.5">{m.away}</p>
                                       {result ? (
                                           <>
-                                              <p className="text-[15px] sm:text-xl font-black text-blue-600 leading-none">{result.probs.away.toFixed(1)}%</p>
-                                              <div className="flex flex-col items-end leading-tight mt-1 text-[11px] text-[#2b2c34] font-black uppercase italic">
+                                              <p className="text-[12px] font-black text-blue-600">{result.probs.away.toFixed(1)}%</p>
+                                              <div className="flex flex-col text-[8px] text-[#2b2c34] font-black uppercase italic leading-tight">
                                                   <span>XG: {result.expectedGoals.away.toFixed(2)}</span>
                                                   <span>ODD: {calcOdd(result.probs.away)}</span>
                                               </div>
                                           </>
-                                      ) : <p className="text-[10px] text-[#2b2c34] font-black uppercase italic text-right">Pendente</p>}
+                                      ) : <p className="text-[8px] text-[#2b2c34]/30 font-black uppercase italic">Pendente</p>}
                                   </div>
                               </div>
                           );
-                      }) : <div className="text-center py-20 text-[#2b2c34]/30 font-black uppercase text-xs tracking-[0.3em] border-4 border-dashed border-[#2b2c34]/5 rounded-[2.5rem]">Aguardando simulação</div>}
+                      })}
                   </div>
               </section>
           </div>
         )}
 
-        {/* LIGA */}
+        {/* LIGA COMPACTA MOBILE */}
         {activeTab === 'league' && (
-          <div className="space-y-6 animate-in">
-            <section className="bg-[#fffffe] rounded-[2.5rem] border-2 border-[#2b2c34] p-6 md:p-10 shadow-[8px_8px_0px_#2b2c34]">
-              <div className="flex flex-col justify-between items-center gap-6 mb-10 text-center">
-                <div className="space-y-2">
-                  <h3 className="font-black text-[#2b2c34] text-xl uppercase tracking-widest flex items-center justify-center gap-3 leading-none"><Trophy className="w-7 h-7 text-[#ff5e3a] fill-current" /> TEMPORADA 2026</h3>
-                  <p className="text-[#2b2c34] text-[12px] font-black uppercase tracking-[0.4em]">Engine de Monte Carlo</p>
-                </div>
-                <button onClick={runLeagueSimulation} disabled={isSimulatingLeague || !leagueSchedule.length} className="w-full h-16 sm:w-auto px-12 py-5 bg-[#ff5e3a] text-[#fffffe] rounded-2xl font-black text-xs uppercase tracking-[0.2em] shadow-[4px_4px_0px_#2b2c34] transition-all active:scale-95 flex items-center justify-center gap-4">
-                  {isSimulatingLeague ? <Activity className="animate-spin w-6 h-6" /> : <TableIcon className="w-6 h-6" />} SIMULAR TEMPORADA
+          <div className="space-y-4 animate-in">
+            <section className="bg-[#fffffe] rounded-2xl border-2 border-[#2b2c34] p-4 shadow-[4px_4px_0px_#2b2c34]">
+              <div className="flex flex-col gap-3 mb-5 text-center">
+                <h3 className="font-black text-[#2b2c34] text-xs uppercase flex items-center justify-center gap-2"><Trophy className="w-4 h-4 text-[#ff5e3a] fill-current" /> TEMPORADA 2026</h3>
+                <button onClick={runLeagueSimulation} disabled={isSimulatingLeague || !leagueSchedule.length} className="w-full py-4 bg-[#ff5e3a] text-[#fffffe] rounded-xl font-black text-[10px] uppercase shadow-[2px_2px_0px_#2b2c34]">
+                  {isSimulatingLeague ? <Activity className="animate-spin w-4 h-4 mx-auto" /> : "SIMULAR TEMPORADA"}
                 </button>
               </div>
               {leagueTable.length > 0 ? (
-                <div className="overflow-x-auto rounded-[2rem] border-2 border-[#2b2c34] shadow-[4px_4px_0px_#2b2c34] no-scrollbar">
-                  <table className="w-full text-left border-collapse min-w-[380px]">
-                    <thead className="bg-[#f0f4f8] text-[11px] font-black text-[#2b2c34] uppercase border-b-2 border-[#2b2c34]">
-                      <tr><th className="px-3 py-5 w-8 text-center opacity-50">#</th><th className="px-3 py-5">EQUIPE</th><th className="px-2 py-5 text-center tracking-wider">XPTS</th><th className="px-2 py-5 text-center text-[#ff5e3a] tracking-widest">TIT</th><th className="px-2 py-5 text-center text-[#059669]">G6</th><th className="px-2 py-5 text-center text-[#e45858]">Z4</th></tr>
+                <div className="overflow-x-hidden rounded-xl border border-[#2b2c34]/10">
+                  <table className="w-full text-left border-collapse table-fixed">
+                    <thead className="bg-[#f0f4f8] text-[7.5px] font-black text-[#2b2c34] uppercase border-b-2 border-[#2b2c34] tracking-tighter">
+                      <tr><th className="px-1 py-3 w-5 text-center">#</th><th className="px-1 py-3 w-[25%]">EQUIPE</th><th className="px-1 py-3 text-center">XPTS</th><th className="px-1 py-3 text-center text-[#ff5e3a]">TIT</th><th className="px-1 py-3 text-center text-[#059669]">G6</th><th className="px-1 py-3 text-center text-[#e45858]">Z4</th></tr>
                     </thead>
-                    <tbody className="divide-y-2 divide-[#2b2c34]/5 text-[12px] sm:text-[14px] font-bold text-[#2b2c34]">
+                    <tbody className="divide-y divide-[#2b2c34]/5 text-[9.5px] font-bold text-[#2b2c34]">
                       {leagueTable.map((row, idx) => (
-                        <tr key={row.name} className="hover:bg-[#ff5e3a]/5 transition-colors">
-                          <td className="px-2 py-4 text-[#2b2c34]/60 font-black text-center text-[11px]">{idx + 1}</td>
-                          <td className="px-3 py-4 font-black uppercase tracking-tighter truncate max-w-[90px]">{row.name}</td>
-                          <td className="px-2 py-4 text-center font-mono font-black bg-[#f0f4f8]/50 text-[14px]">{row.avgPoints.toFixed(1)}</td>
-                          <td className="px-2 py-4 text-center font-black text-[#ff5e3a] text-[14px]">{row.titleProb > 0.05 ? `${row.titleProb.toFixed(1)}%` : '-'}</td>
-                          <td className="px-2 py-4 text-center font-black text-[#059669] text-[14px]">{row.libertaProb > 0.05 ? `${row.libertaProb.toFixed(1)}%` : '-'}</td>
-                          <td className="px-2 py-4 text-center font-black text-[#e45858] text-[14px]">{row.z4Prob > 0.05 ? `${row.z4Prob.toFixed(1)}%` : '-'}</td>
+                        <tr key={row.name} className="hover:bg-[#ff5e3a]/5">
+                          <td className="px-1 py-2 text-[#2b2c34]/30 font-black text-center text-[7.5px]">{idx + 1}</td>
+                          <td className="px-1 py-2 font-black uppercase truncate max-w-[65px] leading-none">{row.name}</td>
+                          <td className="px-1 py-2 text-center font-mono bg-[#f0f4f8]/50 text-[10.5px]">{row.avgPoints.toFixed(1)}</td>
+                          <td className="px-1 py-2 text-center font-black text-[#ff5e3a]">{row.titleProb > 0.05 ? `${row.titleProb.toFixed(1)}%` : '-'}</td>
+                          <td className="px-1 py-2 text-center font-black text-[#059669]">{row.libertaProb > 0.05 ? `${row.libertaProb.toFixed(1)}%` : '-'}</td>
+                          <td className="px-1 py-2 text-center font-black text-[#e45858]">{row.z4Prob > 0.05 ? `${row.z4Prob.toFixed(1)}%` : '-'}</td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
-              ) : <div className="text-center py-24 border-4 border-dashed border-[#2b2c34]/5 rounded-[3rem] text-[#2b2c34]/20 uppercase font-black text-[10px] tracking-[0.5em]">Simulação Pendente</div>}
+              ) : <div className="text-center py-12 text-[#2b2c34]/20 font-black uppercase text-[8px]">Simulação pendente</div>}
             </section>
           </div>
         )}
 
-        {/* RANKING */}
+        {/* RANKING COMPACTO MOBILE */}
         {activeTab === 'ranking' && (
-          <div className="space-y-6 animate-in">
-             <section className="bg-[#fffffe] rounded-[2.5rem] shadow-[8px_8px_0px_#2b2c34] border-2 border-[#2b2c34] overflow-hidden">
-                <div className="p-6 md:p-10 bg-[#f0f4f8]/50 border-b-2 border-[#2b2c34]">
-                    <div className="flex flex-col sm:flex-row items-center justify-between mb-8 gap-4">
-                        <div className="space-y-1">
-                            <h3 className="font-black text-[#2b2c34] text-xl uppercase tracking-tighter leading-none">Power Ranking Técnico</h3>
-                            <p className="text-[12px] text-[#2b2c34] font-black uppercase tracking-[0.3em] leading-none mt-3">Escala [-3.00, +3.00]</p>
-                        </div>
-                        <Award className="w-12 h-12 text-[#ff5e3a] drop-shadow-[4px_4px_0px_#2b2c34]" />
+          <div className="space-y-4 animate-in">
+             <section className="bg-[#fffffe] rounded-2xl shadow-[4px_4px_0px_#2b2c34] border-2 border-[#2b2c34] overflow-hidden">
+                <div className="p-3.5 bg-[#f0f4f8]/50 border-b-2 border-[#2b2c34]">
+                    <div className="flex items-center justify-between mb-3">
+                        <h3 className="font-black text-[#2b2c34] text-xs uppercase leading-none">Power Ranking</h3>
+                        <Award className="w-5 h-5 text-[#ff5e3a]" />
                     </div>
-                    <div className="relative group">
-                        <Search className="absolute left-5 top-1/2 -translate-y-1/2 w-5 h-5 text-[#2b2c34] group-focus-within:text-[#ff5e3a] transition-all" />
-                        <input type="text" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="Filtrar time..." className="w-full bg-[#fffffe] border-2 border-[#2b2c34] rounded-2xl py-4 pl-14 pr-6 font-bold text-sm outline-none focus:border-[#ff5e3a] transition-all shadow-inner text-[#2b2c34]" />
+                    <div className="relative">
+                        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#2b2c34]/30" />
+                        <input type="text" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="Pesquisar..." className="w-full bg-[#fffffe] border-2 border-[#2b2c34] rounded-lg py-1.5 pl-8 pr-3 font-bold text-[11px] outline-none text-[#2b2c34]" />
                     </div>
                 </div>
-                <div className="overflow-x-auto no-scrollbar px-2 sm:px-0">
-                  <table className="w-full text-left border-collapse min-w-[340px]">
-                    <thead className="bg-[#f0f4f8] text-[11px] font-black text-[#2b2c34] uppercase border-b-2 border-[#2b2c34]">
-                        <tr><th className="px-6 py-6 w-[50%]">Equipe</th><th className="px-3 py-6 text-center w-[25%]">Ataque</th><th className="px-6 py-6 text-center w-[25%]">Defesa</th></tr>
+                <div className="overflow-x-hidden">
+                  <table className="w-full text-left border-collapse table-fixed">
+                    <thead className="bg-[#f0f4f8] text-[8px] font-black text-[#2b2c34] uppercase border-b-2 border-[#2b2c34]">
+                        <tr><th className="px-3 py-3 w-[45%]">Equipe</th><th className="px-1 py-3 text-center w-[27.5%]">Atq</th><th className="px-1 py-3 text-center w-[27.5%]">Def</th></tr>
                     </thead>
-                    <tbody className="divide-y-2 divide-[#2b2c34]/5 text-[11px] sm:text-xs">
+                    <tbody className="divide-y divide-[#2b2c34]/5">
                       {powerRanking.map((team, idx) => (
-                        <tr key={team.name} className="hover:bg-[#ff5e3a]/5 transition-colors">
-                          <td className="px-6 py-6 flex flex-col gap-1.5"><span className="text-[15px] sm:text-[18px] font-black text-[#2b2c34] uppercase tracking-tight leading-none truncate max-w-[140px]">{team.name}</span><span className="text-[10px] font-black text-[#2b2c34] uppercase leading-none tracking-widest italic opacity-40">Rank #{idx + 1}</span></td>
-                          <td className="px-3 py-6 text-center leading-none"><div className={`text-[13px] sm:text-sm font-mono font-black px-3 py-1.5 rounded-xl inline-block min-w-[55px] ${team.attack > 0 ? 'text-[#fffffe] bg-[#ff5e3a] shadow-[2px_2px_0px_#2b2c34]' : 'text-[#2b2c34] bg-[#f0f4f8] border-2 border-[#2b2c34]'}`}>{team.attack.toFixed(2)}</div></td>
-                          <td className="px-6 py-6 text-center leading-none"><div className={`text-[13px] sm:text-sm font-mono font-black px-3 py-1.5 rounded-xl inline-block min-w-[55px] ${team.defense < 0 ? 'text-[#fffffe] bg-[#059669] shadow-[2px_2px_0px_#2b2c34]' : 'text-[#e45858] bg-[#e45858]/10 border-2 border-[#2b2c34]'}`}>{team.defense.toFixed(2)}</div></td>
+                        <tr key={team.name} className="hover:bg-[#ff5e3a]/5">
+                          <td className="px-3 py-3 flex flex-col gap-0.5 min-w-0"><span className="text-[12px] font-black uppercase truncate w-full">{team.name}</span><span className="text-[7.5px] font-black opacity-30 italic leading-none">Rank #{idx + 1}</span></td>
+                          <td className="px-1 py-3 text-center leading-none"><div className={`text-[11px] font-mono font-black px-1.5 py-1 rounded-lg inline-block min-w-[42px] ${team.attack > 0 ? 'text-[#fffffe] bg-[#ff5e3a]' : 'text-[#2b2c34] bg-[#f0f4f8] border border-[#2b2c34]/10'}`}>{team.attack.toFixed(2)}</div></td>
+                          <td className="px-1 py-3 text-center leading-none"><div className={`text-[11px] font-mono font-black px-1.5 py-1 rounded-lg inline-block min-w-[42px] ${team.defense < 0 ? 'text-[#fffffe] bg-[#059669]' : 'text-[#e45858] bg-[#e45858]/10 border border-[#e45858]/30'}`}>{team.defense.toFixed(2)}</div></td>
                         </tr>
                       ))}
                     </tbody>
