@@ -36,11 +36,10 @@ const SEASON_SHEET_TAB = 'Rodadas_com jogos faltantes';
 const SIMULATION_COUNT = 10000; 
 const LEAGUE_SIM_COUNT = 10000; 
 const EPOCHS = 100; 
-const LEARNING_RATE = 0.01; // Ajustado para evitar explosão dos parâmetros
+const LEARNING_RATE = 0.012; 
 const XI_CANDIDATES = [0.000, 0.0005, 0.0010, 0.0015, 0.0020, 0.0025, 0.0030]; 
 
-// Fator de escala ajustado para distribuir melhor entre -3 e +3 sem bater no teto
-const UI_SCALE_FACTOR = 7; 
+const UI_SCALE_FACTOR = 8; 
 
 /**
  * UTILITÁRIOS ESTATÍSTICOS
@@ -76,11 +75,13 @@ const calculateRPS = (probs, outcome) => {
 };
 
 const runMonteCarlo = (homeTeam, awayTeam, globalHfa, rho, iterations) => {
-  // Removido o clamp para usar o valor real da força
+  // Desescala os valores da UI para a matemática pura
   const attH = (homeTeam?.attack || 0) / UI_SCALE_FACTOR;
   const defH = (homeTeam?.defense || 0) / UI_SCALE_FACTOR;
   const attA = (awayTeam?.attack || 0) / UI_SCALE_FACTOR;
   const defA = (awayTeam?.defense || 0) / UI_SCALE_FACTOR;
+  
+  // HFA se soma aos valores desescalados (estão na mesma unidade logarítmica)
   const hfa_eff = ((globalHfa + (homeTeam?.hfa_raw || 0)) / 2);
 
   const lambdaH = Math.exp(attH + defA + hfa_eff);
@@ -225,7 +226,7 @@ export default function App() {
     const avgDef = Object.values(finalTeams).reduce((s, t) => s + t.defense_raw, 0) / tCount;
     Object.keys(finalTeams).forEach(n => {
       const att_zeroed = finalTeams[n].attack_raw - avgAtt, def_zeroed = finalTeams[n].defense_raw - avgDef;
-      // Removida a limitação artificial (Clamp) para permitir que os times se distanciem
+      // Aplica a escala visual, mas NÃO limita artificialmente (clamp) para preservar as diferenças reais
       finalTeams[n].attack = att_zeroed * UI_SCALE_FACTOR;
       finalTeams[n].defense = def_zeroed * UI_SCALE_FACTOR;
       finalTeams[n].hfa_raw = finalTeams[n].hfa_raw;
@@ -605,7 +606,7 @@ export default function App() {
                         <tr key={team.name} className="hover:bg-[#ff5e3a]/5 transition-colors">
                           <td className="px-4 py-4 flex flex-col gap-1 min-w-0"><span className="text-[13px] font-black uppercase truncate w-full">{team.name}</span><span className="text-[8px] font-black opacity-40 italic leading-none">Rank #{idx + 1}</span></td>
                           <td className="px-1 py-4 text-center leading-none"><div className={`text-[12px] font-mono font-black px-2 py-1.5 rounded-xl inline-block min-w-[45px] ${team.attack > 0 ? 'text-[#fffffe] bg-[#ff5e3a] shadow-[2px_2px_0px_#2b2c34]' : 'text-[#2b2c34] bg-[#f0f4f8] border-2 border-[#2b2c34]'}`}>{team.attack.toFixed(2)}</div></td>
-                          <td className="px-1 py-4 text-center leading-none"><div className={`text-[12px] font-mono font-black px-2 py-1.5 rounded-xl inline-block min-w-[45px] ${team.defense < 0 ? 'text-[#fffffe] bg-[#059669] shadow-[2px_2px_0px_#2b2c34]' : 'text-[#e45858] bg-[#e45858]/10 border-2 border-[#2b2c34]'}`}>{team.defense.toFixed(2)}</div></td>
+                          <td className="px-1 py-4 text-center leading-none"><div className={`text-[12px] font-mono font-black px-2 py-1.5 rounded-xl inline-block min-w-[45px] ${team.defense < 0 ? 'text-[#fffffe] bg-[#059669] shadow-[2px_2px_0px_#2b2c34]' : 'text-[#e45858] bg-[#e45858]/10 border-2 border-[#e45858]/30'}`}>{team.defense.toFixed(2)}</div></td>
                         </tr>
                       ))}
                     </tbody>
