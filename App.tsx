@@ -27,7 +27,7 @@ import {
 } from 'lucide-react';
 
 /**
- * CONFIGURAÇÕES TÉCNICAS
+ * CONFIGURAÇÕES TÉCNICAS E ESTATÍSTICAS
  */
 const TRAIN_SHEET_ID = '1FGqg7rC3MmE8dYhd_7g8fXQUjgV9aarjwyTEovSATBI';
 const SEASON_SHEET_ID = '1Nt0hpb81Uwzltz08UaawNGVhmJUK7Jx4iIR7i_67Hp0';
@@ -39,7 +39,8 @@ const EPOCHS = 100;
 const LEARNING_RATE = 0.012; 
 const XI_CANDIDATES = [0.000, 0.0005, 0.0010, 0.0015, 0.0020, 0.0025, 0.0030]; 
 
-const UI_SCALE_FACTOR = 8; 
+const UI_SCALE_FACTOR = 11; 
+const MAX_RATING = 3.0; 
 
 /**
  * UTILITÁRIOS ESTATÍSTICOS
@@ -53,10 +54,10 @@ const simulatePoisson = (lambda) => {
 };
 
 const tauCorrection = (h, a, lambdaH, lambdaA, rho) => {
-  if (h === 0 && a === 0) return 1 - (lambdaH * lambdaA * rho);
   if (h === 0 && a === 1) return 1 + (lambdaH * rho);
   if (h === 1 && a === 0) return 1 + (lambdaA * rho);
   if (h === 1 && a === 1) return 1 - rho;
+  if (h === 0 && a === 0) return 1 - (lambdaH * lambdaA * rho);
   return 1;
 };
 
@@ -171,18 +172,13 @@ export default function App() {
     allTeams.forEach(t => teamStats[t] = { attack_raw: 0, defense_raw: 0, hfa_raw: 0 });
     let currentHfa = 0.25, currentRho = 0.00;
     const now = new Date();
-
-    const weightedMatches = matches.map(m => ({
-      ...m, weight: Math.exp(-xi * Math.max(0, (now - m.matchDate) / (1000 * 60 * 60 * 24)))
-    }));
-
+    const weightedMatches = matches.map(m => ({...m, weight: Math.exp(-xi * Math.max(0, (now - m.matchDate) / (1000 * 60 * 60 * 24)))}));
     for (let e = 0; e < EPOCHS; e++) {
       weightedMatches.forEach(match => {
         const h = teamStats[match.home], a = teamStats[match.away];
         const lambdaH = Math.exp(h.attack_raw + a.defense_raw + (currentHfa + h.hfa_raw)/2);
         const lambdaA = Math.exp(a.attack_raw + h.defense_raw);
         const errorH = match.hPond - lambdaH, errorA = match.aPond - lambdaA;
-        
         h.attack_raw += LEARNING_RATE * errorH * match.weight;
         a.attack_raw += LEARNING_RATE * errorA * match.weight;
         a.defense_raw += LEARNING_RATE * errorH * match.weight; 
@@ -207,11 +203,9 @@ export default function App() {
       return { home, away, matchDate, hPond: 0.7 * hxG + 0.3 * hG, aPond: 0.7 * axG + 0.3 * aG, hG, aG };
     }).filter(m => m.home && m.away && !isNaN(m.matchDate));
     processed.sort((a, b) => a.matchDate - b.matchDate);
-    
     const splitIdx = Math.floor(processed.length * 0.85);
     const trainSet = processed.slice(0, splitIdx);
     const validationSet = processed.slice(splitIdx);
-
     let bestXi = 0.0019, minRps = Infinity;
     XI_CANDIDATES.forEach(xi => {
       const model = trainModel(trainSet, xi);
@@ -226,16 +220,14 @@ export default function App() {
       const avgRps = totalRps / validationSet.length;
       if (avgRps < minRps) { minRps = avgRps; bestXi = xi; }
     });
-
     const finalModel = trainModel(processed, bestXi);
     const finalTeams = finalModel.teamStats, tCount = Object.keys(finalTeams).length;
     const avgAtt = Object.values(finalTeams).reduce((s, t) => s + t.attack_raw, 0) / tCount;
     const avgDef = Object.values(finalTeams).reduce((s, t) => s + t.defense_raw, 0) / tCount;
     Object.keys(finalTeams).forEach(n => {
       const att_zeroed = finalTeams[n].attack_raw - avgAtt, def_zeroed = finalTeams[n].defense_raw - avgDef;
-      // ATUALIZAÇÃO: Escala limitada a [-3, +3]
-      finalTeams[n].attack = Math.max(-3, Math.min(3, att_zeroed * UI_SCALE_FACTOR));
-      finalTeams[n].defense = Math.max(-3, Math.min(3, def_zeroed * UI_SCALE_FACTOR));
+      finalTeams[n].attack = Math.max(-MAX_RATING, Math.min(MAX_RATING, att_zeroed * UI_SCALE_FACTOR));
+      finalTeams[n].defense = Math.max(-MAX_RATING, Math.min(MAX_RATING, def_zeroed * UI_SCALE_FACTOR));
       finalTeams[n].hfa_raw = finalTeams[n].hfa_raw;
     });
     setTeams(finalTeams);
@@ -299,7 +291,6 @@ export default function App() {
       const currentSeasonTeams = new Set();
       leagueSchedule.forEach(m => { if(m.home) currentSeasonTeams.add(m.home); if(m.away) currentSeasonTeams.add(m.away); });
       currentSeasonTeams.forEach(t => stats[t] = { simPoints: 0, title: 0, liberta: 0, preLiberta: 0, sula: 0, z4: 0 });
-
       for (let i = 0; i < LEAGUE_SIM_COUNT; i++) {
         const currentStandings = {};
         currentSeasonTeams.forEach(t => currentStandings[t] = 0);
@@ -368,154 +359,162 @@ export default function App() {
   const powerRanking = useMemo(() => Object.entries(teams).map(([name, stats]) => ({ name, ...stats, strength: stats.attack - stats.defense })).filter(t => t.name.toLowerCase().includes(searchTerm.toLowerCase())).sort((a, b) => b.strength - a.strength), [teams, searchTerm]);
 
   if (loading) return (
-    <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-white p-4 text-center">
-      <Activity className="w-10 h-10 text-orange-500 animate-pulse mb-4" />
-      <h2 className="text-lg font-black uppercase tracking-tighter leading-tight">Calibrando Inteligência 2026</h2>
-      <p className="text-slate-500 text-[10px] mt-4 font-mono uppercase tracking-[0.2em]">Optimizing Odds | Season Mapping</p>
+    <div className="min-h-screen bg-[#f0f4f8] flex flex-col items-center justify-center text-[#2b2c34] p-4 text-center font-roboto">
+      <Activity className="w-12 h-12 text-[#ff5e3a] animate-pulse mb-4" />
+      <h2 className="text-xl font-black uppercase tracking-tighter leading-tight">Sincronizando Modelos...</h2>
+      <p className="text-[#2b2c34]/60 text-[10px] mt-4 font-mono uppercase tracking-[0.2em]">Otimizando via WMLE | Backtesting Ativo</p>
     </div>
   );
 
   return (
-    <div className="min-h-screen bg-slate-50 font-sans text-slate-900 pb-12">
-      <nav className="bg-white border-b border-slate-200 sticky top-0 z-50 px-4 py-2.5 flex justify-between items-center shadow-sm">
+    <div className="min-h-screen bg-[#f0f4f8] font-roboto text-[#2b2c34] pb-12">
+      <style dangerouslySetInnerHTML={{ __html: `
+        @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;700;900&display=swap');
+        .font-roboto { font-family: 'Roboto', sans-serif; }
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; height: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #ff5e3a33; border-radius: 10px; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        @keyframes fade-in { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+        .animate-in { animation: fade-in 0.5s ease-out; }
+      `}} />
+
+      {/* HEADER VIBRANT SUNSET & ICE */}
+      <nav className="bg-[#fffffe] border-b-2 border-[#2b2c34] sticky top-0 z-50 px-4 py-3 flex justify-between items-center shadow-lg">
         <div className="flex items-center gap-2">
-          <div className="bg-slate-900 p-1.5 rounded-lg shrink-0"><Target className="text-orange-400 w-4 h-4 sm:w-5 sm:h-5" /></div>
+          <div className="bg-[#ff5e3a] p-1.5 rounded-lg shrink-0 shadow-[4px_4px_0px_#2b2c34]"><Target className="text-[#fffffe] w-5 h-5" /></div>
           <div>
-            <h1 className="text-[11px] sm:text-sm font-black tracking-tighter uppercase leading-none text-slate-800">Dixon-Coles Pro</h1>
-            <p className="text-[7px] sm:text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-0.5 italic">XI: {globalParams.xi.toFixed(4)}</p>
+            <h1 className="text-sm font-black tracking-tight uppercase leading-none text-[#2b2c34]">Dixon-Coles Pro</h1>
+            <p className="text-[11px] font-black text-[#ff8906] uppercase mt-1 italic">XI: {globalParams.xi.toFixed(4)}</p>
           </div>
         </div>
         
-        <div className="flex items-center gap-2 sm:gap-4">
+        <div className="flex items-center gap-3">
           {modelAccuracy && (
-            <div className="flex flex-col items-end border-r border-slate-200 pr-2 sm:pr-4">
-                <span className="text-[7px] font-black text-slate-400 uppercase leading-none">Backtesting</span>
-                <span className="text-[10px] sm:text-xs font-black text-emerald-500 tracking-tight leading-tight">{modelAccuracy}% Precision</span>
+            <div className="flex flex-col items-end border-r-2 border-[#2b2c34]/10 pr-3">
+                <span className="text-[8px] font-black text-[#2b2c34]/70 uppercase leading-none">Backtesting</span>
+                <span className="text-[13px] font-black text-[#059669] tracking-tight leading-tight">{modelAccuracy}% Precision</span>
             </div>
           )}
-          <button onClick={fetchAllData} className="p-1.5 bg-slate-50 hover:bg-slate-100 rounded-full border border-slate-200 shadow-sm shrink-0"><RefreshCw className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-slate-400" /></button>
+          <button onClick={fetchAllData} className="p-2 bg-[#f0f4f8] hover:bg-[#ff5e3a] group rounded-full border-2 border-[#2b2c34] transition-colors"><RefreshCw className="w-4 h-4 text-[#2b2c34] group-hover:text-[#fffffe]" /></button>
         </div>
       </nav>
 
-      <main className="max-w-3xl mx-auto p-3 sm:p-4 space-y-5">
-        <div className="flex flex-row overflow-x-auto gap-1 p-1 bg-white rounded-xl border border-slate-200 w-full shadow-sm no-scrollbar">
-          <button onClick={() => setActiveTab('match')} className={`flex-1 whitespace-nowrap px-3 py-2 rounded-lg text-[10px] font-black uppercase tracking-tight transition-all flex items-center justify-center gap-1.5 ${activeTab === 'match' ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-400'}`}><Zap className="w-3 h-3" /> Jogo</button>
-          <button onClick={() => setActiveTab('round')} className={`flex-1 whitespace-nowrap px-3 py-2 rounded-lg text-[10px] font-black uppercase tracking-tight transition-all flex items-center justify-center gap-1.5 ${activeTab === 'round' ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-400'}`}><Calendar className="w-3 h-3" /> Rodada</button>
-          <button onClick={() => setActiveTab('league')} className={`flex-1 whitespace-nowrap px-3 py-2 rounded-lg text-[10px] font-black uppercase tracking-tight transition-all flex items-center justify-center gap-1.5 ${activeTab === 'league' ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-400'}`}><TableIcon className="w-3 h-3" /> Liga</button>
-          <button onClick={() => setActiveTab('ranking')} className={`flex-1 whitespace-nowrap px-3 py-2 rounded-lg text-[10px] font-black uppercase tracking-tight transition-all flex items-center justify-center gap-1.5 ${activeTab === 'ranking' ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-400'}`}><ListOrdered className="w-3 h-3" /> Ranking</button>
+      <main className="max-w-3xl mx-auto p-3 sm:p-4 space-y-6">
+        {/* TABS NEO-BRUTALIST - FONT INCREASED */}
+        <div className="flex flex-row overflow-x-auto gap-2 p-1.5 bg-[#fffffe] rounded-2xl border-2 border-[#2b2c34] w-full shadow-[6px_6px_0px_#2b2c34] no-scrollbar">
+          {['match', 'round', 'league', 'ranking'].map((tab) => (
+            <button key={tab} onClick={() => setActiveTab(tab)} className={`flex-1 whitespace-nowrap px-4 py-3 rounded-xl text-[12px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${activeTab === tab ? 'bg-[#ff5e3a] text-[#fffffe] shadow-[2px_2px_0px_#2b2c34]' : 'text-[#2b2c34] hover:text-[#ff5e3a]'}`}>
+              {tab === 'match' && <Zap className="w-4 h-4" />}
+              {tab === 'round' && <Calendar className="w-4 h-4" />}
+              {tab === 'league' && <TableIcon className="w-4 h-4" />}
+              {tab === 'ranking' && <ListOrdered className="w-4 h-4" />}
+              {tab.charAt(0).toUpperCase() + tab.slice(1)}
+            </button>
+          ))}
         </div>
 
         {/* JOGO ÚNICO */}
         {activeTab === 'match' && (
-          <div className="space-y-5 animate-in fade-in duration-500">
-            <section className="bg-white rounded-[2rem] shadow-xl border border-slate-200 overflow-hidden">
-              <div className="bg-slate-900 p-4 sm:p-5 text-white relative">
+          <div className="space-y-6 animate-in">
+            <section className="bg-[#fffffe] rounded-[2rem] shadow-[8px_8px_0px_#2b2c34] border-2 border-[#2b2c34] overflow-hidden">
+              <div className="p-6">
                 <div className="flex flex-col gap-3">
                     <div className="space-y-1">
-                      <label className="text-[8px] font-black text-slate-500 uppercase tracking-widest ml-1 leading-none">Mandante</label>
-                      <select value={selectedHome} onChange={(e) => setSelectedHome(e.target.value)} className="w-full bg-white/10 border border-white/20 rounded-xl p-2.5 font-bold text-sm outline-none text-white appearance-none cursor-pointer leading-tight">
-                        <option value="" className="text-slate-900">Selecionar...</option>
-                        {Object.keys(teams).sort().map(t => <option key={t} value={t} className="text-slate-900">{t}</option>)}
+                      <label className="text-[11px] font-black text-[#2b2c34] uppercase tracking-[0.2em] ml-2 leading-none">Mandante</label>
+                      <select value={selectedHome} onChange={(e) => setSelectedHome(e.target.value)} className="w-full bg-[#f0f4f8] border-2 border-[#2b2c34] rounded-2xl p-3 font-bold text-sm outline-none appearance-none leading-tight focus:bg-[#fffffe] transition-all text-[#2b2c34]">
+                        <option value="">Selecionar...</option>
+                        {Object.keys(teams).sort().map(t => <option key={t} value={t}>{t}</option>)}
                       </select>
                     </div>
-                    <div className="flex justify-center text-orange-500/50 text-lg font-black italic leading-none py-0.5">VS</div>
+                    <div className="flex justify-center text-[#ff5e3a] text-lg font-black italic leading-none py-1">VS</div>
                     <div className="space-y-1">
-                      <label className="text-[8px] font-black text-slate-500 uppercase tracking-widest ml-1 block leading-none">Visitante</label>
-                      <select value={selectedAway} onChange={(e) => setSelectedAway(e.target.value)} className="w-full bg-white/10 border border-white/20 rounded-xl p-2.5 font-bold text-sm outline-none text-white appearance-none cursor-pointer leading-tight">
-                        <option value="" className="text-slate-900">Selecionar...</option>
-                        {Object.keys(teams).sort().map(t => <option key={t} value={t} className="text-slate-900">{t}</option>)}
+                      <label className="text-[11px] font-black text-[#2b2c34] uppercase tracking-[0.2em] ml-2 block leading-none">Visitante</label>
+                      <select value={selectedAway} onChange={(e) => setSelectedAway(e.target.value)} className="w-full bg-[#f0f4f8] border-2 border-[#2b2c34] rounded-2xl p-3 font-bold text-sm outline-none appearance-none leading-tight focus:bg-[#fffffe] transition-all text-[#2b2c34]">
+                        <option value="">Selecionar...</option>
+                        {Object.keys(teams).sort().map(t => <option key={t} value={t}>{t}</option>)}
                       </select>
                     </div>
                 </div>
-                <div className="mt-6 flex gap-3">
-                  <button onClick={handleSimulateMatch} disabled={isSimulating || !selectedHome || !selectedAway || selectedHome === selectedAway} className="flex-1 py-4.5 rounded-xl font-black text-white uppercase tracking-widest bg-orange-600 hover:bg-orange-500 transition-all active:scale-[0.98] disabled:opacity-30 flex items-center justify-center gap-2 text-[10px]">
-                    {isSimulating ? <Activity className="animate-spin w-4 h-4" /> : <Play className="fill-current w-3.5 h-3.5" />} PREVISÃO
+                <div className="mt-8 flex gap-3">
+                  <button onClick={handleSimulateMatch} disabled={isSimulating || !selectedHome || !selectedAway || selectedHome === selectedAway} className="flex-1 h-16 rounded-2xl font-black text-[#fffffe] uppercase tracking-[0.2em] bg-[#ff5e3a] hover:bg-[#ff5e3a]/90 transition-all active:scale-[0.98] disabled:opacity-30 flex items-center justify-center gap-3 text-xs shadow-[4px_4px_0px_#2b2c34]">
+                    {isSimulating ? <Activity className="animate-spin w-5 h-5" /> : <Play className="fill-current w-4 h-4" />} PREVISÃO
                   </button>
-                  <button onClick={handleResetMatch} className="py-4 px-5 rounded-xl bg-white/10 hover:bg-white/20 text-white transition-all shadow-xl flex items-center justify-center" title="Limpar"><Trash2 className="w-4 h-4" /></button>
+                  <button onClick={handleResetMatch} className="py-4 px-6 rounded-2xl bg-[#fffffe] hover:bg-[#f0f4f8] text-[#2b2c34] transition-all border-2 border-[#2b2c34] shadow-[4px_4px_0px_#2b2c34] flex items-center justify-center" title="Limpar"><Trash2 className="w-5 h-5" /></button>
                 </div>
               </div>
             </section>
 
             {simulationResult && (
-              <div className="space-y-5 animate-in slide-in-from-bottom-4 duration-500">
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="bg-white p-3 rounded-2xl border border-slate-100 shadow-sm">
-                      <div className="flex items-center gap-2 mb-2">
-                          <Home className="w-3 h-3 text-emerald-400 shrink-0" />
-                          <span className="text-[9px] font-black uppercase text-slate-800 truncate">{selectedHome}</span>
+              <div className="space-y-6 animate-in slide-in-from-bottom-4 duration-500">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="bg-[#fffffe] p-4 rounded-3xl border-2 border-[#2b2c34] shadow-[4px_4px_0px_#2b2c34]">
+                      <div className="flex items-center gap-2 mb-3">
+                          <Home className="w-4 h-4 text-[#ff5e3a] shrink-0" />
+                          <span className="text-[11px] font-black uppercase text-[#2b2c34] truncate">{selectedHome}</span>
                       </div>
-                      <div className="flex justify-between items-center mb-1 leading-none text-[10px]"><span className="text-slate-400 font-bold uppercase">Atq:</span><span className="font-black text-emerald-600">{teams[selectedHome]?.attack.toFixed(2)}</span></div>
-                      <div className="flex justify-between items-center leading-none text-[10px]"><span className="text-slate-400 font-bold uppercase">Def:</span><span className={`font-black ${teams[selectedHome]?.defense < 0 ? 'text-blue-500' : 'text-orange-500'}`}>{teams[selectedHome]?.defense.toFixed(2)}</span></div>
+                      <div className="flex justify-between items-center mb-1.5 leading-none text-[13px] font-mono"><span className="text-[#2b2c34] font-black uppercase text-[11px]">ATQ:</span><span className="font-black text-[#ff5e3a]">{teams[selectedHome]?.attack.toFixed(2)}</span></div>
+                      <div className="flex justify-between items-center leading-none text-[13px] font-mono"><span className="text-[#2b2c34] font-black uppercase text-[11px]">DEF:</span><span className={`font-black ${teams[selectedHome]?.defense < 0 ? 'text-[#059669]' : 'text-[#e45858]'}`}>{teams[selectedHome]?.defense.toFixed(2)}</span></div>
                   </div>
-                  <div className="bg-white p-3 rounded-2xl border border-slate-100 shadow-sm text-right">
-                      <div className="flex items-center gap-2 mb-2 justify-end">
-                          <span className="text-[9px] font-black uppercase text-slate-800 truncate">{selectedAway}</span>
-                          <MapPin className="w-3 h-3 text-blue-400 shrink-0" />
+                  <div className="bg-[#fffffe] p-4 rounded-3xl border-2 border-[#2b2c34] shadow-[4px_4px_0px_#2b2c34] text-right">
+                      <div className="flex items-center gap-2 mb-3 justify-end">
+                          <span className="text-[11px] font-black uppercase text-[#2b2c34] truncate">{selectedAway}</span>
+                          <MapPin className="w-4 h-4 text-[#ff5e3a] shrink-0" />
                       </div>
-                      <div className="flex justify-between items-center mb-1 leading-none text-[10px]"><span className="text-slate-400 font-bold uppercase">Atq:</span><span className="font-black text-emerald-600">{teams[selectedAway]?.attack.toFixed(2)}</span></div>
-                      <div className="flex justify-between items-center leading-none text-[10px]"><span className="text-slate-400 font-bold uppercase">Def:</span><span className={`font-black ${teams[selectedAway]?.defense < 0 ? 'text-blue-500' : 'text-orange-500'}`}>{teams[selectedAway]?.defense.toFixed(2)}</span></div>
+                      <div className="flex justify-between items-center mb-1.5 leading-none text-[13px] font-mono"><span className="text-[#2b2c34] font-black uppercase text-[11px]">ATQ:</span><span className="font-black text-[#ff5e3a]">{teams[selectedAway]?.attack.toFixed(2)}</span></div>
+                      <div className="flex justify-between items-center leading-none text-[13px] font-mono"><span className="text-[#2b2c34] font-black uppercase text-[11px]">DEF:</span><span className={`font-black ${teams[selectedAway]?.defense < 0 ? 'text-[#059669]' : 'text-[#e45858]'}`}>{teams[selectedAway]?.defense.toFixed(2)}</span></div>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-3 gap-2.5">
-                  <div className="bg-white p-3 rounded-2xl border border-slate-100 shadow-sm text-center">
-                    <p className="text-[8px] font-black text-slate-300 uppercase mb-1.5 truncate leading-none">{selectedHome}</p>
-                    <h3 className="text-xl font-black text-slate-800 tabular-nums leading-none">{simulationResult.probs.home.toFixed(1)}%</h3>
-                    <div className="mt-2 flex flex-col gap-1 leading-none">
-                      <span className="text-[8px] font-black text-emerald-600 bg-emerald-50 px-1 py-0.5 rounded-full uppercase">Odd: {calcOdd(simulationResult.probs.home)}</span>
-                      <span className="text-[8px] font-bold text-slate-400 uppercase italic">xG: {simulationResult.expectedGoals.home.toFixed(2)}</span>
+                <div className="grid grid-cols-3 gap-3">
+                  {[
+                    { label: selectedHome, val: simulationResult.probs.home, sub: `xG: ${simulationResult.expectedGoals.home.toFixed(2)}`, color: 'text-[#ff5e3a]', odd: calcOdd(simulationResult.probs.home) },
+                    { label: 'Empate', val: simulationResult.probs.draw, sub: '---', color: 'text-[#2b2c34]', odd: calcOdd(simulationResult.probs.draw) },
+                    { label: selectedAway, val: simulationResult.probs.away, sub: `xG: ${simulationResult.expectedGoals.away.toFixed(2)}`, color: 'text-blue-600', odd: calcOdd(simulationResult.probs.away) }
+                  ].map((item, i) => (
+                    <div key={i} className="bg-[#fffffe] p-4 rounded-[2rem] border-2 border-[#2b2c34] shadow-[4px_4px_0px_#2b2c34] text-center">
+                      <p className="text-[10px] font-black text-[#2b2c34] uppercase mb-2 truncate tracking-widest leading-none">{item.label}</p>
+                      <h3 className={`text-2xl font-black ${item.color} tabular-nums leading-none`}>{item.val.toFixed(1)}%</h3>
+                      <div className="mt-3 flex flex-col gap-1.5 leading-none">
+                        <span className="text-[11px] font-black text-[#2b2c34] bg-[#f0f4f8] px-2 py-1 rounded-full uppercase border-2 border-[#2b2c34]">ODD: {item.odd}</span>
+                        {item.sub !== '---' && <span className="text-[10px] font-black text-[#2b2c34] uppercase italic bg-[#ff8906]/10 px-1 py-0.5 rounded">{item.sub}</span>}
+                      </div>
                     </div>
-                  </div>
-                  <div className="bg-white p-3 rounded-2xl border border-slate-100 shadow-sm text-center flex flex-col justify-center">
-                    <p className="text-[8px] font-black text-slate-300 uppercase mb-1.5 leading-none">Empate</p>
-                    <h3 className="text-xl font-black text-slate-800 tabular-nums leading-none">{simulationResult.probs.draw.toFixed(1)}%</h3>
-                    <div className="mt-2"><span className="text-[8px] font-black text-slate-500 bg-slate-50 px-2 py-0.5 rounded-full uppercase">Odd: {calcOdd(simulationResult.probs.draw)}</span></div>
-                  </div>
-                  <div className="bg-white p-3 rounded-2xl border border-slate-100 shadow-sm text-center">
-                    <p className="text-[8px] font-black text-slate-300 uppercase mb-1.5 truncate leading-none">{selectedAway}</p>
-                    <h3 className="text-xl font-black text-slate-800 tabular-nums leading-none">{simulationResult.probs.away.toFixed(1)}%</h3>
-                    <div className="mt-2 flex flex-col gap-1 leading-none">
-                      <span className="text-[8px] font-black text-blue-600 bg-blue-50 px-1 py-0.5 rounded-full uppercase">Odd: {calcOdd(simulationResult.probs.away)}</span>
-                      <span className="text-[8px] font-bold text-slate-400 uppercase italic">xG: {simulationResult.expectedGoals.away.toFixed(2)}</span>
-                    </div>
-                  </div>
+                  ))}
                 </div>
 
-                <div className="bg-white rounded-[1.5rem] border border-slate-200 shadow-xl overflow-hidden p-4">
-                  <div className="flex flex-col sm:flex-row justify-between items-center mb-5 gap-3 border-b border-slate-100 pb-4 text-center sm:text-left">
-                    <h4 className="font-black text-slate-800 text-[11px] uppercase tracking-wider flex items-center justify-center sm:justify-start gap-1.5 leading-none"><PieChart className="w-3.5 h-3.5 text-orange-600" /> Matriz de Resultados</h4>
-                    <div className="flex gap-2 w-full sm:w-auto justify-center">
-                        <div className="flex-1 bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-100 text-center leading-none">
-                           <span className="text-[7px] font-black text-emerald-500 uppercase block mb-1 tracking-tighter">xPts Casa</span>
-                           <span className="text-xs font-black text-slate-800 tabular-nums leading-none">{simulationResult.expectedPointsHome.toFixed(2)}</span>
+                <div className="bg-[#fffffe] rounded-[2.5rem] border-2 border-[#2b2c34] shadow-[8px_8px_0px_#2b2c34] p-6">
+                  <div className="flex flex-col sm:flex-row justify-between items-center mb-6 gap-4 border-b-2 border-[#2b2c34]/5 pb-6">
+                    <h4 className="font-black text-[#2b2c34] text-[13px] uppercase tracking-[0.2em] flex items-center gap-2"><PieChart className="w-5 h-5 text-[#ff5e3a]" /> MATRIZ DE PROBABILIDADES</h4>
+                    <div className="flex gap-4 w-full sm:w-auto">
+                        <div className="flex-1 bg-[#f0f4f8] px-4 py-2.5 rounded-2xl border-2 border-[#2b2c34] text-center leading-none flex flex-row items-center gap-3">
+                           <span className="text-[10px] font-black text-[#ff5e3a] uppercase block text-left">XPTS<br/>CASA</span>
+                           <span className="text-xl font-black text-[#2b2c34] tabular-nums">{simulationResult.expectedPointsHome.toFixed(2)}</span>
                         </div>
-                        <div className="flex-1 bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-100 text-center leading-none">
-                           <span className="text-[7px] font-black text-blue-500 uppercase block mb-1 tracking-tighter">xPts Fora</span>
-                           <span className="text-xs font-black text-slate-800 tabular-nums leading-none">{simulationResult.expectedPointsAway.toFixed(2)}</span>
+                        <div className="flex-1 bg-[#f0f4f8] px-4 py-2.5 rounded-2xl border-2 border-[#2b2c34] text-center leading-none flex flex-row items-center gap-3">
+                           <span className="text-[10px] font-black text-blue-600 uppercase block text-left">XPTS<br/>FORA</span>
+                           <span className="text-xl font-black text-[#2b2c34] tabular-nums">{simulationResult.expectedPointsAway.toFixed(2)}</span>
                         </div>
                     </div>
                   </div>
                   
-                  <div className="flex flex-col items-center">
-                     <div className="mb-3 text-[9px] font-black text-orange-600 uppercase tracking-[0.4em] flex items-center gap-2 shrink-0">
-                        <MapPin className="w-3 h-3" /> VISITANTE →
-                     </div>
-                     <div className="flex gap-1 w-full justify-center">
-                        <div className="[writing-mode:vertical-lr] rotate-180 text-[9px] font-black text-orange-600 uppercase tracking-[0.4em] flex items-center gap-2 shrink-0">
-                           <Home className="w-3.5 h-3.5" /> MANDANTE →
-                        </div>
-                        <div className="w-full max-w-[450px]">
-                          <div className="grid grid-cols-7 gap-0.5 pb-1">
+                  <div className="flex flex-col items-center overflow-x-auto no-scrollbar">
+                     <div className="mb-4 text-[10px] font-black text-[#ff5e3a] uppercase tracking-[0.5em]">VISITANTE →</div>
+                     <div className="flex gap-2 w-full justify-center">
+                        <div className="[writing-mode:vertical-lr] rotate-180 text-[10px] font-black text-[#ff5e3a] uppercase tracking-[0.5em]">MANDANTE →</div>
+                        <div className="w-full max-w-[480px]">
+                          <div className="grid grid-cols-7 gap-1">
                             <div className="col-span-1"></div>
-                            {Array.from({length: 6}).map((_, i) => <div key={i} className="text-center text-[10px] font-black text-slate-400 uppercase leading-none pb-1">{i}</div>)}
+                            {Array.from({length: 6}).map((_, i) => <div key={i} className="text-center text-[12px] font-black text-[#2b2c34]/50">{i}</div>)}
                             {simulationResult.matrix.map((row, hS) => (
                               <React.Fragment key={hS}>
-                                <div className="flex items-center justify-end pr-2 text-[10px] font-black text-slate-400 uppercase leading-none">{hS}</div>
+                                <div className="flex items-center justify-end pr-3 text-[12px] font-black text-[#2b2c34]/50">{hS}</div>
                                 {row.map((prob, aS) => {
                                   const intensity = Math.min(prob * 10, 100);
                                   return (
-                                    <div key={aS} className="aspect-square rounded-sm flex items-center justify-center border border-white/5" style={{ backgroundColor: `rgba(234, 88, 12, ${intensity / 100})`, color: intensity > 40 ? 'white' : '#9a3412' }}>
-                                      <span className="text-[11px] sm:text-[14px] font-black tabular-nums leading-none">{prob.toFixed(1)}%</span>
+                                    <div key={aS} className="aspect-square rounded-lg flex items-center justify-center border-2 border-[#2b2c34]/5 transition-transform hover:scale-105" style={{ backgroundColor: `rgba(255, 94, 58, ${intensity / 100})`, color: intensity > 40 ? '#fffffe' : '#2b2c34' }}>
+                                      <span className="text-[11px] sm:text-[14px] font-black tabular-nums">{prob.toFixed(1)}%</span>
                                     </div>
                                   );
                                 })}
@@ -533,68 +532,65 @@ export default function App() {
 
         {/* RODADA */}
         {activeTab === 'round' && (
-          <div className="space-y-5 animate-in fade-in duration-500">
-              <section className="bg-white rounded-[1.5rem] border border-slate-200 p-5 md:p-8 text-center sm:text-left">
-                  <div className="flex flex-col sm:flex-row items-center justify-between mb-6 gap-4">
-                      <h3 className="font-black text-slate-800 text-sm sm:text-lg uppercase tracking-tight flex items-center gap-2 leading-none"><Calendar className="w-4 h-4 sm:w-5 sm:h-5 text-orange-500" /> Previsões da Rodada</h3>
+          <div className="space-y-6 animate-in">
+              <section className="bg-[#fffffe] rounded-[2.5rem] border-2 border-[#2b2c34] p-6 md:p-10 shadow-[8px_8px_0px_#2b2c34]">
+                  <div className="flex flex-col sm:flex-row items-center justify-between mb-8 gap-4">
+                      <h3 className="font-black text-[#2b2c34] text-lg uppercase tracking-tight flex items-center gap-2 leading-none text-center sm:text-left"><Calendar className="w-5 h-5 text-[#ff5e3a]" /> RODADA ATUAL</h3>
                       <div className="flex items-center gap-3 w-full sm:w-auto">
-                          <span className="text-[9px] font-black text-slate-400 uppercase">Jornada</span>
-                          <select value={selectedRound} onChange={(e) => { setSelectedRound(Number(e.target.value)); setRoundResults({}); }} className="flex-1 sm:flex-none bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 font-bold text-xs outline-none cursor-pointer leading-none">
+                          <span className="text-[11px] font-black text-[#2b2c34] uppercase tracking-widest">JORNADA</span>
+                          <select value={selectedRound} onChange={(e) => { setSelectedRound(Number(e.target.value)); setRoundResults({}); }} className="flex-1 sm:flex-none bg-[#f0f4f8] border-2 border-[#2b2c34] rounded-xl px-4 py-2.5 font-bold text-sm outline-none focus:bg-[#fffffe] text-[#2b2c34]">
                               {Array.from({length: 38}).map((_, i) => <option key={i+1} value={i+1}>{i+1}</option>)}
                           </select>
                       </div>
                   </div>
 
-                  <button onClick={handleSimulateRound} disabled={isSimulatingRound || !roundGamesData.length} className="w-full mb-6 py-6 bg-orange-600 hover:bg-orange-500 text-white rounded-xl font-black text-xs uppercase tracking-widest disabled:opacity-50 flex items-center justify-center gap-4 shadow-xl h-16">
+                  <button onClick={handleSimulateRound} disabled={isSimulatingRound || !roundGamesData.length} className="w-full h-16 mb-8 py-5 bg-[#ff5e3a] hover:bg-[#ff5e3a]/90 text-[#fffffe] rounded-2xl font-black text-xs uppercase tracking-[0.2em] transition-all flex items-center justify-center gap-4 shadow-[4px_4px_0px_#2b2c34]">
                       {isSimulatingRound ? <Activity className="animate-spin w-5 h-5" /> : <Play className="w-5 h-5 fill-current" />} SIMULAR RODADA
                   </button>
 
-                  <div className="grid grid-cols-1 gap-3">
+                  <div className="grid grid-cols-1 gap-4">
                       {roundGamesData.length > 0 ? roundGamesData.map((m, idx) => {
                           const result = roundResults[`${m.home}-${m.away}`];
                           return (
-                              <div key={idx} className="bg-slate-50 rounded-2xl p-3.5 border border-slate-100 flex items-center justify-between group hover:bg-white hover:shadow-lg transition-all relative overflow-hidden">
-                                  {/* Casa - Forçado para Esquerda */}
-                                  <div className="flex-1 text-left flex flex-col gap-1 pr-1">
-                                      <p className="font-black text-slate-800 uppercase leading-none truncate w-full text-left" style={{ fontSize: 'clamp(10px, 3.1vw, 14px)' }}>{m.home}</p>
+                              <div key={idx} className="bg-[#f0f4f8]/80 rounded-3xl p-5 border-2 border-[#2b2c34] flex items-center justify-between group hover:bg-[#fffffe] transition-all relative overflow-hidden">
+                                  <div className="flex-1 text-left flex flex-col gap-1.5 pr-2">
+                                      <p className="font-black text-[#2b2c34] uppercase leading-none truncate w-full" style={{ fontSize: 'clamp(11px, 3.2vw, 15px)' }}>{m.home}</p>
                                       {result ? (
                                           <>
-                                              <p className="text-[13px] sm:text-base font-black text-emerald-600 leading-none text-left">{result.probs.home.toFixed(1)}%</p>
-                                              <div className="flex flex-col leading-tight mt-1 items-start text-left">
-                                                  <span className="text-[8px] sm:text-[9px] text-slate-400 font-bold uppercase italic leading-none">xG: {result.expectedGoals.home.toFixed(2)}</span>
-                                                  <span className="text-[8px] sm:text-[9px] text-slate-400 font-bold uppercase italic leading-none mt-0.5">Odd: {calcOdd(result.probs.home)}</span>
+                                              <p className="text-[15px] sm:text-xl font-black text-[#ff5e3a] leading-none">{result.probs.home.toFixed(1)}%</p>
+                                              <div className="flex flex-col leading-tight mt-1 text-[11px] text-[#2b2c34] font-black uppercase italic">
+                                                  <span>XG: {result.expectedGoals.home.toFixed(2)}</span>
+                                                  <span>ODD: {calcOdd(result.probs.home)}</span>
                                               </div>
                                           </>
-                                      ) : <p className="text-[8px] text-slate-300 font-black uppercase leading-none text-left">Pendente</p>}
+                                      ) : <p className="text-[10px] text-[#2b2c34] font-black uppercase italic">Pendente</p>}
                                   </div>
 
-                                  {/* Centro (Empate) - Destaque */}
-                                  <div className="flex flex-col items-center px-1 shrink-0 z-10">
-                                      <div className="text-[8px] font-black text-slate-200 italic leading-none mb-1">VS</div>
+                                  <div className="flex flex-col items-center px-2 shrink-0 z-10">
+                                      <div className="text-[10px] font-black text-[#2b2c34] italic mb-2 tracking-widest opacity-30">VS</div>
                                       {result && (
-                                        <div className="bg-slate-900 px-3 py-2 rounded-xl flex flex-col items-center shadow-lg border border-white/10 min-w-[55px]">
-                                            <span className="text-[7px] font-black text-slate-400 uppercase leading-none mb-0.5 tracking-tighter">EMPATE</span>
-                                            <span className="text-[12px] sm:text-sm font-black text-white leading-none tabular-nums">{result.probs.draw.toFixed(0)}%</span>
+                                        <div className="bg-[#2b2c34] px-4 py-2.5 rounded-xl flex flex-col items-center shadow-xl min-w-[65px] border-2 border-[#2b2c34]">
+                                            <span className="text-[7.5px] font-black text-[#fffffe]/70 uppercase leading-none mb-1 tracking-tighter">EMPATE</span>
+                                            <span className="text-[15px] sm:text-lg font-black text-[#fffffe] leading-none tabular-nums">{result.probs.draw.toFixed(0)}%</span>
                                         </div>
                                       )}
                                   </div>
 
-                                  {/* Fora - Forçado para Direita */}
-                                  <div className="flex-1 text-right flex flex-col items-end gap-1 pl-1">
-                                      <p className="font-black text-slate-800 uppercase leading-none truncate w-full text-right" style={{ fontSize: 'clamp(10px, 3.1vw, 14px)' }}>{m.away}</p>
+                                  <div className="flex-1 text-right flex flex-col items-end gap-1.5 pl-2">
+                                      <p className="font-black text-[#2b2c34] uppercase leading-none truncate w-full" style={{ fontSize: 'clamp(11px, 3.2vw, 15px)' }}>{m.away}</p>
                                       {result ? (
                                           <>
-                                              <p className="text-[14px] sm:text-lg font-black text-blue-600 leading-none text-right">{result.probs.away.toFixed(1)}%</p>
-                                              <div className="flex flex-col items-end leading-tight mt-1 text-right">
-                                                  <span className="text-[8px] sm:text-[9px] text-slate-400 font-bold uppercase italic leading-none">xG: {result.expectedGoals.away.toFixed(2)}</span>
-                                                  <span className="text-[8px] sm:text-[9px] text-slate-400 font-bold uppercase italic leading-none mt-0.5">Odd: {calcOdd(result.probs.away)}</span>
+                                              <p className="text-[15px] sm:text-xl font-black text-blue-600 leading-none">{result.probs.away.toFixed(1)}%</p>
+                                              <div className="flex flex-col items-end leading-tight mt-1 text-[11px] text-[#2b2c34] font-black uppercase italic">
+                                                  <span>XG: {result.expectedGoals.away.toFixed(2)}</span>
+                                                  <span>ODD: {calcOdd(result.probs.away)}</span>
                                               </div>
                                           </>
-                                      ) : <p className="text-[8px] text-slate-300 font-black uppercase leading-none text-right">Pendente</p>}
+                                      ) : <p className="text-[10px] text-[#2b2c34] font-black uppercase italic text-right">Pendente</p>}
                                   </div>
                               </div>
                           );
-                      }) : <div className="text-center py-20 text-slate-300 font-black uppercase text-xs tracking-widest border-2 border-dashed border-slate-100 rounded-2xl">Nenhum jogo encontrado</div>}
+                      }) : <div className="text-center py-20 text-[#2b2c34]/30 font-black uppercase text-xs tracking-[0.3em] border-4 border-dashed border-[#2b2c34]/5 rounded-[2.5rem]">Aguardando simulação</div>}
                   </div>
               </section>
           </div>
@@ -602,98 +598,79 @@ export default function App() {
 
         {/* LIGA */}
         {activeTab === 'league' && (
-          <div className="space-y-6 animate-in fade-in duration-500">
-            <section className="bg-white rounded-[1.5rem] border border-slate-200 p-5 md:p-8 text-center sm:text-left">
-              <div className="flex flex-col justify-between items-center gap-6 mb-8 text-center">
-                <h3 className="font-black text-slate-800 text-base uppercase tracking-tight flex items-center justify-center gap-2 leading-none"><Trophy className="w-6 h-6 text-yellow-500 fill-current" /> Temporada 2026</h3>
-                <button onClick={runLeagueSimulation} disabled={isSimulatingLeague || !leagueSchedule.length} className="w-full sm:w-auto px-10 py-6 bg-slate-900 text-white rounded-2xl font-black text-xs uppercase shadow-xl transition-all active:scale-95 flex items-center justify-center gap-4 h-16">
-                  {isSimulatingLeague ? <RefreshCw className="animate-spin w-5 h-5" /> : <TableIcon className="w-5 h-5" />} SIMULAR TEMPORADA
+          <div className="space-y-6 animate-in">
+            <section className="bg-[#fffffe] rounded-[2.5rem] border-2 border-[#2b2c34] p-6 md:p-10 shadow-[8px_8px_0px_#2b2c34]">
+              <div className="flex flex-col justify-between items-center gap-6 mb-10 text-center">
+                <div className="space-y-2">
+                  <h3 className="font-black text-[#2b2c34] text-xl uppercase tracking-widest flex items-center justify-center gap-3 leading-none"><Trophy className="w-7 h-7 text-[#ff5e3a] fill-current" /> TEMPORADA 2026</h3>
+                  <p className="text-[#2b2c34] text-[12px] font-black uppercase tracking-[0.4em]">Engine de Monte Carlo</p>
+                </div>
+                <button onClick={runLeagueSimulation} disabled={isSimulatingLeague || !leagueSchedule.length} className="w-full h-16 sm:w-auto px-12 py-5 bg-[#ff5e3a] text-[#fffffe] rounded-2xl font-black text-xs uppercase tracking-[0.2em] shadow-[4px_4px_0px_#2b2c34] transition-all active:scale-95 flex items-center justify-center gap-4">
+                  {isSimulatingLeague ? <Activity className="animate-spin w-6 h-6" /> : <TableIcon className="w-6 h-6" />} SIMULAR TEMPORADA
                 </button>
               </div>
               {leagueTable.length > 0 ? (
-                <div className="overflow-x-auto rounded-3xl border border-slate-100 shadow-inner no-scrollbar">
-                  <table className="w-full text-left border-collapse min-w-[360px]">
-                    <thead className="bg-slate-50 text-[9px] font-black text-slate-400 uppercase border-b border-slate-100">
-                      <tr><th className="px-1 py-4 w-6 text-center">#</th><th className="px-2 py-4">EQUIPE</th><th className="px-1 py-4 text-center text-slate-800">XPTS</th><th className="px-1 py-4 text-center text-orange-600">TIT</th><th className="px-1 py-4 text-center text-emerald-600">G6</th><th className="px-1 py-4 text-center text-red-500">Z4</th></tr>
+                <div className="overflow-x-auto rounded-[2rem] border-2 border-[#2b2c34] shadow-[4px_4px_0px_#2b2c34] no-scrollbar">
+                  <table className="w-full text-left border-collapse min-w-[380px]">
+                    <thead className="bg-[#f0f4f8] text-[11px] font-black text-[#2b2c34] uppercase border-b-2 border-[#2b2c34]">
+                      <tr><th className="px-3 py-5 w-8 text-center opacity-50">#</th><th className="px-3 py-5">EQUIPE</th><th className="px-2 py-5 text-center tracking-wider">XPTS</th><th className="px-2 py-5 text-center text-[#ff5e3a] tracking-widest">TIT</th><th className="px-2 py-5 text-center text-[#059669]">G6</th><th className="px-2 py-5 text-center text-[#e45858]">Z4</th></tr>
                     </thead>
-                    <tbody className="divide-y divide-slate-100 text-[11px] sm:text-[13px] font-bold text-slate-700">
+                    <tbody className="divide-y-2 divide-[#2b2c34]/5 text-[12px] sm:text-[14px] font-bold text-[#2b2c34]">
                       {leagueTable.map((row, idx) => (
-                        <tr key={row.name} className="hover:bg-orange-50/20 transition-colors">
-                          <td className="px-1 py-4 text-slate-300 font-black text-center text-[10px]">{idx + 1}</td>
-                          <td className="px-2 py-4 text-slate-900 font-black uppercase tracking-tighter truncate max-w-[75px] leading-tight text-[11px]">{row.name}</td>
-                          <td className="px-1 py-4 text-center font-mono font-black text-slate-900 bg-slate-50/50 text-[11px] leading-none">{row.avgPoints.toFixed(1)}</td>
-                          <td className="px-1 py-4 text-center font-black text-orange-600 text-[11px] leading-none">{row.titleProb > 0.05 ? `${row.titleProb.toFixed(1)}%` : '-'}</td>
-                          <td className="px-1 py-4 text-center font-black text-emerald-600 text-[11px] leading-none">{row.libertaProb > 0.05 ? `${row.libertaProb.toFixed(1)}%` : '-'}</td>
-                          <td className="px-1 py-4 text-center font-black text-red-500 text-[11px] leading-none">{row.z4Prob > 0.05 ? `${row.z4Prob.toFixed(1)}%` : '-'}</td>
+                        <tr key={row.name} className="hover:bg-[#ff5e3a]/5 transition-colors">
+                          <td className="px-2 py-4 text-[#2b2c34]/60 font-black text-center text-[11px]">{idx + 1}</td>
+                          <td className="px-3 py-4 font-black uppercase tracking-tighter truncate max-w-[90px]">{row.name}</td>
+                          <td className="px-2 py-4 text-center font-mono font-black bg-[#f0f4f8]/50 text-[14px]">{row.avgPoints.toFixed(1)}</td>
+                          <td className="px-2 py-4 text-center font-black text-[#ff5e3a] text-[14px]">{row.titleProb > 0.05 ? `${row.titleProb.toFixed(1)}%` : '-'}</td>
+                          <td className="px-2 py-4 text-center font-black text-[#059669] text-[14px]">{row.libertaProb > 0.05 ? `${row.libertaProb.toFixed(1)}%` : '-'}</td>
+                          <td className="px-2 py-4 text-center font-black text-[#e45858] text-[14px]">{row.z4Prob > 0.05 ? `${row.z4Prob.toFixed(1)}%` : '-'}</td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
-              ) : <div className="text-center py-24 border-4 border-dashed border-slate-50 rounded-[3rem]"><TableIcon className="w-16 h-16 text-slate-100 mx-auto mb-6" /><p className="text-slate-300 text-[10px] font-black uppercase tracking-widest">Simulação pendente</p></div>}
+              ) : <div className="text-center py-24 border-4 border-dashed border-[#2b2c34]/5 rounded-[3rem] text-[#2b2c34]/20 uppercase font-black text-[10px] tracking-[0.5em]">Simulação Pendente</div>}
             </section>
           </div>
         )}
 
         {/* RANKING */}
         {activeTab === 'ranking' && (
-          <div className="space-y-6 animate-in fade-in duration-500">
-             <section className="bg-white rounded-[1.5rem] shadow-xl border border-slate-200 overflow-hidden">
-                <div className="p-5 md:p-8 bg-slate-50 border-b border-slate-200 text-center sm:text-left">
+          <div className="space-y-6 animate-in">
+             <section className="bg-[#fffffe] rounded-[2.5rem] shadow-[8px_8px_0px_#2b2c34] border-2 border-[#2b2c34] overflow-hidden">
+                <div className="p-6 md:p-10 bg-[#f0f4f8]/50 border-b-2 border-[#2b2c34]">
                     <div className="flex flex-col sm:flex-row items-center justify-between mb-8 gap-4">
                         <div className="space-y-1">
-                            <h3 className="font-black text-slate-800 text-lg uppercase tracking-tight leading-none">Power Ranking Técnico</h3>
-                            <p className="text-[9px] text-slate-400 font-black uppercase tracking-[0.2em] leading-none mt-2">Dixon-Coles WMLE [-3, +3]</p>
+                            <h3 className="font-black text-[#2b2c34] text-xl uppercase tracking-tighter leading-none">Power Ranking Técnico</h3>
+                            <p className="text-[12px] text-[#2b2c34] font-black uppercase tracking-[0.3em] leading-none mt-3">Escala [-3.00, +3.00]</p>
                         </div>
-                        <Award className="w-8 h-8 text-orange-500 shrink-0" />
+                        <Award className="w-12 h-12 text-[#ff5e3a] drop-shadow-[4px_4px_0px_#2b2c34]" />
                     </div>
                     <div className="relative group">
-                        <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-300 group-focus-within:text-orange-500 transition-all" />
-                        <input type="text" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="Pesquisar por equipa..." className="w-full bg-white border-2 border-slate-100 rounded-2xl py-4 pl-12 pr-4 font-bold text-sm outline-none focus:ring-4 focus:ring-orange-500/10 focus:border-orange-500 transition-all shadow-sm" />
+                        <Search className="absolute left-5 top-1/2 -translate-y-1/2 w-5 h-5 text-[#2b2c34] group-focus-within:text-[#ff5e3a] transition-all" />
+                        <input type="text" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="Filtrar time..." className="w-full bg-[#fffffe] border-2 border-[#2b2c34] rounded-2xl py-4 pl-14 pr-6 font-bold text-sm outline-none focus:border-[#ff5e3a] transition-all shadow-inner text-[#2b2c34]" />
                     </div>
                 </div>
                 <div className="overflow-x-auto no-scrollbar px-2 sm:px-0">
-                  <table className="w-full text-left border-collapse min-w-[320px]">
-                    <thead className="bg-slate-50 text-[10px] font-black text-slate-400 uppercase border-b border-slate-100">
-                        <tr><th className="px-4 py-5 sm:px-8">Equipe</th><th className="px-2 py-5 text-center">Ataque</th><th className="px-4 py-5 sm:px-8 text-center">Defesa</th></tr>
+                  <table className="w-full text-left border-collapse min-w-[340px]">
+                    <thead className="bg-[#f0f4f8] text-[11px] font-black text-[#2b2c34] uppercase border-b-2 border-[#2b2c34]">
+                        <tr><th className="px-6 py-6 w-[50%]">Equipe</th><th className="px-3 py-6 text-center w-[25%]">Ataque</th><th className="px-6 py-6 text-center w-[25%]">Defesa</th></tr>
                     </thead>
-                    <tbody className="divide-y divide-slate-50">
+                    <tbody className="divide-y-2 divide-[#2b2c34]/5 text-[11px] sm:text-xs">
                       {powerRanking.map((team, idx) => (
-                        <tr key={team.name} className="hover:bg-orange-50/50 transition-colors">
-                          <td className="px-4 py-6 sm:px-8 flex flex-col gap-1"><span className="text-[12px] sm:text-base font-black text-slate-800 uppercase tracking-tight leading-none truncate max-w-[120px]">{team.name}</span><span className="text-[8px] font-black text-slate-300 uppercase tracking-[0.2em] mt-1">Global #{idx + 1}</span></td>
-                          <td className="px-2 py-6 text-center"><div className={`text-[11px] sm:text-sm font-mono font-black px-2 py-1 rounded-lg ${team.attack > 0 ? 'text-emerald-600 bg-emerald-50' : 'text-slate-400 bg-slate-50'}`}>{team.attack.toFixed(2)}</div></td>
-                          <td className="px-4 py-6 sm:px-8 text-center"><div className={`text-[11px] sm:text-sm font-mono font-black px-2 py-1 rounded-lg ${team.defense < 0 ? 'text-blue-600 bg-blue-50' : 'text-orange-600 bg-orange-50'}`}>{team.defense.toFixed(2)}</div></td>
+                        <tr key={team.name} className="hover:bg-[#ff5e3a]/5 transition-colors">
+                          <td className="px-6 py-6 flex flex-col gap-1.5"><span className="text-[15px] sm:text-[18px] font-black text-[#2b2c34] uppercase tracking-tight leading-none truncate max-w-[140px]">{team.name}</span><span className="text-[10px] font-black text-[#2b2c34] uppercase leading-none tracking-widest italic opacity-40">Rank #{idx + 1}</span></td>
+                          <td className="px-3 py-6 text-center leading-none"><div className={`text-[13px] sm:text-sm font-mono font-black px-3 py-1.5 rounded-xl inline-block min-w-[55px] ${team.attack > 0 ? 'text-[#fffffe] bg-[#ff5e3a] shadow-[2px_2px_0px_#2b2c34]' : 'text-[#2b2c34] bg-[#f0f4f8] border-2 border-[#2b2c34]'}`}>{team.attack.toFixed(2)}</div></td>
+                          <td className="px-6 py-6 text-center leading-none"><div className={`text-[13px] sm:text-sm font-mono font-black px-3 py-1.5 rounded-xl inline-block min-w-[55px] ${team.defense < 0 ? 'text-[#fffffe] bg-[#059669] shadow-[2px_2px_0px_#2b2c34]' : 'text-[#e45858] bg-[#e45858]/10 border-2 border-[#2b2c34]'}`}>{team.defense.toFixed(2)}</div></td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
-                <div className="p-8 bg-slate-900 text-white relative text-center sm:text-left">
-                   <div className="relative z-10 flex flex-col gap-6">
-                      <div className="flex flex-col sm:flex-row items-center gap-4 border-b border-white/10 pb-6">
-                        <CheckCircle2 className="w-8 h-8 text-emerald-400 shrink-0" />
-                        <div><p className="text-[11px] font-black text-emerald-400 uppercase tracking-widest leading-none mb-2">Backtesting Automatizado</p><p className="text-[10px] text-slate-400 font-medium leading-relaxed uppercase">RPS (Ranked Probability Score): {modelAccuracy || '--'}%.</p></div>
-                      </div>
-                      <div className="flex flex-col sm:flex-row items-center gap-4">
-                        <Shield className="w-8 h-8 text-orange-500 shrink-0" />
-                        <div><p className="text-[11px] font-black text-orange-600 uppercase tracking-widest leading-none mb-2">Padrão Dixon-Coles</p><p className="text-[10px] text-slate-400 font-medium leading-relaxed uppercase">Métrica em 0. Ataque alto (+) e Defesa baixa (-) são ideais.</p></div>
-                      </div>
-                   </div>
-                </div>
              </section>
           </div>
         )}
       </main>
-
-      <style dangerouslySetInnerHTML={{ __html: `
-        .custom-scrollbar::-webkit-scrollbar { width: 4px; height: 4px; }
-        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
-        .no-scrollbar::-webkit-scrollbar { display: none; }
-        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-        @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
-        .animate-in { animation: fade-in 0.5s ease-out; }
-      `}} />
     </div>
   );
 }
