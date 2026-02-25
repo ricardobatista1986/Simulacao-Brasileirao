@@ -37,9 +37,12 @@ const SIMULATION_COUNT = 10000;
 const LEAGUE_SIM_COUNT = 10000; 
 const EPOCHS = 100; 
 const LEARNING_RATE = 0.012; 
-const XI_CANDIDATES = [0.000, 0.0005, 0.0010, 0.0015, 0.0020, 0.0025, 0.0030]; 
 
-const UI_SCALE_FACTOR = 8; 
+// GRID SEARCH 2D: Combinando decaimento de tempo com o peso xG ideal
+const XI_CANDIDATES = [0.000, 0.0005, 0.0010, 0.0015, 0.0020, 0.0025, 0.0030]; 
+const XG_WEIGHT_CANDIDATES = [0.0, 0.2, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0];
+
+const UI_SCALE_FACTOR = 11; 
 
 /**
  * UTILITÁRIOS ESTATÍSTICOS
@@ -75,21 +78,15 @@ const calculateRPS = (probs, outcome) => {
 };
 
 const runMonteCarlo = (homeTeam, awayTeam, globalHfa, rho, iterations) => {
-  // Desescala os valores da UI para a matemática pura
   const attH = (homeTeam?.attack || 0) / UI_SCALE_FACTOR;
   const defH = (homeTeam?.defense || 0) / UI_SCALE_FACTOR;
   const attA = (awayTeam?.attack || 0) / UI_SCALE_FACTOR;
   const defA = (awayTeam?.defense || 0) / UI_SCALE_FACTOR;
-  
-  // HFA se soma aos valores desescalados (estão na mesma unidade logarítmica)
   const hfa_eff = ((globalHfa + (homeTeam?.hfa_raw || 0)) / 2);
-
   const lambdaH = Math.exp(attH + defA + hfa_eff);
   const lambdaA = Math.exp(attA + defH);
-
   let homeWins = 0, draws = 0, awayWins = 0;
   let scoreMatrix = Array(6).fill(0).map(() => Array(6).fill(0));
-
   for (let i = 1; i <= iterations; i++) {
     let hG = simulatePoisson(lambdaH);
     let aG = simulatePoisson(lambdaA);
@@ -101,7 +98,6 @@ const runMonteCarlo = (homeTeam, awayTeam, globalHfa, rho, iterations) => {
     scoreMatrix[cH][cA]++;
     if (hG > aG) homeWins++; else if (aG > hG) awayWins++; else draws++;
   }
-
   return {
     probs: { home: (homeWins / iterations) * 100, draw: (draws / iterations) * 100, away: (awayWins / iterations) * 100 },
     matrix: scoreMatrix.map(row => row.map(count => (count / iterations) * 100)),
@@ -126,7 +122,7 @@ const simulateMatchResult = (homeTeam, awayTeam, globalHfa, rho) => {
 
 export default function App() {
   const [teams, setTeams] = useState({});
-  const [globalParams, setGlobalParams] = useState({ hfa: 0.2, rho: 0.05, xi: 0.0019 });
+  const [globalParams, setGlobalParams] = useState({ hfa: 0.2, rho: 0.05, xi: 0.0019, xgWeight: 0.7 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [metrics, setMetrics] = useState({ dataCount: 0, avgGoals: 0 });
@@ -166,28 +162,39 @@ export default function App() {
     return foundKey ? obj[foundKey] : undefined;
   };
 
-  const trainModel = (matches, xi) => {
+  // Motor atualizado para receber o xgWeight na função
+  const trainModel = (matches, xi, xgWeight) => {
     const teamStats = {};
     const allTeams = new Set([...matches.map(m => m.home), ...matches.map(m => m.away)]);
     allTeams.forEach(t => teamStats[t] = { attack_raw: 0, defense_raw: 0, hfa_raw: 0 });
     let currentHfa = 0.25, currentRho = 0.00;
     const now = new Date();
-    const weightedMatches = matches.map(m => ({...m, weight: Math.exp(-xi * Math.max(0, (now - m.matchDate) / (1000 * 60 * 60 * 24)))}));
+    
+    // Aplica na matriz de treino tanto a Recência (XI) quanto a Proporção Realidade/Justiça (XG_WEIGHT)
+    const weightedMatches = matches.map(m => ({
+      ...m, 
+      timeWeight: Math.exp(-xi * Math.max(0, (now - m.matchDate) / (1000 * 60 * 60 * 24))),
+      hPond: (m.hxG * xgWeight) + (m.hG * (1 - xgWeight)),
+      aPond: (m.axG * xgWeight) + (m.aG * (1 - xgWeight))
+    }));
+
     for (let e = 0; e < EPOCHS; e++) {
       weightedMatches.forEach(match => {
         const h = teamStats[match.home], a = teamStats[match.away];
         const lambdaH = Math.exp(h.attack_raw + a.defense_raw + (currentHfa + h.hfa_raw)/2);
         const lambdaA = Math.exp(a.attack_raw + h.defense_raw);
         const errorH = match.hPond - lambdaH, errorA = match.aPond - lambdaA;
-        h.attack_raw += LEARNING_RATE * errorH * match.weight;
-        a.attack_raw += LEARNING_RATE * errorA * match.weight;
-        a.defense_raw += LEARNING_RATE * errorH * match.weight; 
-        h.defense_raw += LEARNING_RATE * errorA * match.weight; 
-        h.hfa_raw += (LEARNING_RATE * 0.2) * errorH * match.weight;
-        currentHfa += (LEARNING_RATE * 0.05) * errorH * match.weight;
+        
+        h.attack_raw += LEARNING_RATE * errorH * match.timeWeight;
+        a.attack_raw += LEARNING_RATE * errorA * match.timeWeight;
+        a.defense_raw += LEARNING_RATE * errorH * match.timeWeight; 
+        h.defense_raw += LEARNING_RATE * errorA * match.timeWeight; 
+        h.hfa_raw += (LEARNING_RATE * 0.2) * errorH * match.timeWeight;
+        currentHfa += (LEARNING_RATE * 0.05) * errorH * match.timeWeight;
+        
         if (match.hPond <= 1 && match.aPond <= 1) {
            const lowScoreError = (match.hPond === match.aPond ? 1 : -1); 
-           currentRho += (LEARNING_RATE * 0.01) * lowScoreError * match.weight;
+           currentRho += (LEARNING_RATE * 0.01) * lowScoreError * match.timeWeight;
         }
       });
     }
@@ -200,40 +207,54 @@ export default function App() {
       const hG = getInsensitive(m, 'hgoals') || 0, aG = getInsensitive(m, 'agoals') || 0;
       const hxG = getInsensitive(m, 'hxg') || hG, axG = getInsensitive(m, 'axg') || aG;
       const matchDate = new Date(getInsensitive(m, 'data'));
-      return { home, away, matchDate, hPond: 0.7 * hxG + 0.3 * hG, aPond: 0.7 * axG + 0.3 * aG, hG, aG };
+      // Agora hPond/aPond são calculados dinamicamente no trainModel
+      return { home, away, matchDate, hG, aG, hxG, axG };
     }).filter(m => m.home && m.away && !isNaN(m.matchDate));
+    
     processed.sort((a, b) => a.matchDate - b.matchDate);
     const splitIdx = Math.floor(processed.length * 0.85);
     const trainSet = processed.slice(0, splitIdx);
     const validationSet = processed.slice(splitIdx);
-    let bestXi = 0.0019, minRps = Infinity;
+    
+    let bestXi = 0.0019, bestXgWeight = 0.7, minRps = Infinity;
+    
+    // Grid Search 2D
     XI_CANDIDATES.forEach(xi => {
-      const model = trainModel(trainSet, xi);
-      let totalRps = 0;
-      validationSet.forEach(m => {
-          const tH = { ...model.teamStats[m.home], attack: model.teamStats[m.home].attack_raw * UI_SCALE_FACTOR, defense: model.teamStats[m.home].defense_raw * UI_SCALE_FACTOR };
-          const tA = { ...model.teamStats[m.away], attack: model.teamStats[m.away].attack_raw * UI_SCALE_FACTOR, defense: model.teamStats[m.away].defense_raw * UI_SCALE_FACTOR };
-          const sim = runMonteCarlo(tH, tA, model.hfa, model.rho, 2000);
-          const outcome = m.hG > m.aG ? 'H' : (m.hG < m.aG ? 'A' : 'D');
-          totalRps += calculateRPS(sim.probs, outcome);
+      XG_WEIGHT_CANDIDATES.forEach(xgWeight => {
+        const model = trainModel(trainSet, xi, xgWeight);
+        let totalRps = 0;
+        validationSet.forEach(m => {
+            const tH = { ...model.teamStats[m.home], attack: model.teamStats[m.home].attack_raw * UI_SCALE_FACTOR, defense: model.teamStats[m.home].defense_raw * UI_SCALE_FACTOR };
+            const tA = { ...model.teamStats[m.away], attack: model.teamStats[m.away].attack_raw * UI_SCALE_FACTOR, defense: model.teamStats[m.away].defense_raw * UI_SCALE_FACTOR };
+            const sim = runMonteCarlo(tH, tA, model.hfa, model.rho, 2000); 
+            const outcome = m.hG > m.aG ? 'H' : (m.hG < m.aG ? 'A' : 'D');
+            totalRps += calculateRPS(sim.probs, outcome);
+        });
+        const avgRps = totalRps / validationSet.length;
+        if (avgRps < minRps) { 
+            minRps = avgRps; 
+            bestXi = xi; 
+            bestXgWeight = xgWeight;
+        }
       });
-      const avgRps = totalRps / validationSet.length;
-      if (avgRps < minRps) { minRps = avgRps; bestXi = xi; }
     });
-    const finalModel = trainModel(processed, bestXi);
+
+    // Treina o modelo definitivo usando a combinação de ouro
+    const finalModel = trainModel(processed, bestXi, bestXgWeight);
     const finalTeams = finalModel.teamStats, tCount = Object.keys(finalTeams).length;
     const avgAtt = Object.values(finalTeams).reduce((s, t) => s + t.attack_raw, 0) / tCount;
     const avgDef = Object.values(finalTeams).reduce((s, t) => s + t.defense_raw, 0) / tCount;
+    
     Object.keys(finalTeams).forEach(n => {
       const att_zeroed = finalTeams[n].attack_raw - avgAtt, def_zeroed = finalTeams[n].defense_raw - avgDef;
-      // Aplica a escala visual, mas NÃO limita artificialmente (clamp) para preservar as diferenças reais
       finalTeams[n].attack = att_zeroed * UI_SCALE_FACTOR;
       finalTeams[n].defense = def_zeroed * UI_SCALE_FACTOR;
       finalTeams[n].hfa_raw = finalTeams[n].hfa_raw;
     });
+    
     setTeams(finalTeams);
-    setGlobalParams({ hfa: finalModel.hfa, rho: finalModel.rho, xi: bestXi });
-    setMetrics({ dataCount: processed.length, avgGoals: processed.reduce((s,m) => s + m.hPond + m.aPond, 0) / processed.length });
+    setGlobalParams({ hfa: finalModel.hfa, rho: finalModel.rho, xi: bestXi, xgWeight: bestXgWeight });
+    setMetrics({ dataCount: processed.length });
   };
 
   const processLeagueSchedule = (matches) => {
@@ -347,8 +368,8 @@ export default function App() {
   if (loading) return (
     <div className="min-h-screen bg-[#f0f4f8] flex flex-col items-center justify-center text-[#2b2c34] p-4 text-center font-roboto">
       <Activity className="w-10 h-10 text-[#ff5e3a] animate-pulse mb-4" />
-      <h2 className="text-lg font-black uppercase tracking-tighter leading-tight">Calibrando Inteligência 2026</h2>
-      <p className="text-slate-500 text-[10px] mt-4 font-mono uppercase tracking-[0.2em]">Optimizing Odds | Season Mapping</p>
+      <h2 className="text-lg font-black uppercase tracking-tighter leading-tight">Sincronizando Modelos...</h2>
+      <p className="text-[#374151]/80 text-[10px] mt-4 font-mono uppercase tracking-[0.2em] font-bold">Otimizando Grid 2D (XI & XG) | Backtesting Ativo</p>
     </div>
   );
 
@@ -368,7 +389,11 @@ export default function App() {
           <div className="bg-[#ff5e3a] p-1 rounded-md shadow-[2px_2px_0px_#2b2c34]"><Target className="text-[#fffffe] w-4 h-4" /></div>
           <div>
             <h1 className="text-[11px] font-black tracking-tight uppercase leading-none">Dixon-Coles Pro</h1>
-            <p className="text-[9px] font-bold text-[#ff8906] uppercase mt-0.5 italic">XI: {globalParams.xi.toFixed(4)}</p>
+            <p className="text-[9px] font-bold text-[#ff8906] uppercase mt-0.5 italic flex items-center gap-1.5">
+                <span>XI: {globalParams.xi.toFixed(4)}</span>
+                <span className="opacity-40">|</span>
+                <span>WG: {(globalParams.xgWeight * 100).toFixed(0)}% XG</span>
+            </p>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -385,7 +410,7 @@ export default function App() {
       <main className="max-w-3xl mx-auto p-2 space-y-4">
         <div className="flex flex-row gap-1 p-1 bg-[#fffffe] rounded-xl border-2 border-[#2b2c34] w-full shadow-[3px_3px_0px_#2b2c34]">
           {['match', 'round', 'league', 'ranking'].map((tab) => (
-            <button key={tab} onClick={() => setActiveTab(tab)} className={`flex-1 px-1 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-1 ${activeTab === tab ? 'bg-[#ff5e3a] text-[#fffffe]' : 'text-[#2b2c34]/60'}`}>
+            <button key={tab} onClick={() => setActiveTab(tab)} className={`flex-1 px-1 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-1 ${activeTab === tab ? 'bg-[#ff5e3a] text-[#fffffe]' : 'text-[#374151]'}`}>
               {tab === 'match' ? 'JOGO' : tab === 'round' ? 'RODADA' : tab === 'league' ? 'LIGA' : 'RANKING'}
             </button>
           ))}
@@ -397,7 +422,7 @@ export default function App() {
               <div className="flex flex-col gap-3">
                   <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
                     <div className="space-y-1">
-                      <label className="text-[9px] font-black text-[#2b2c34]/50 uppercase ml-1">Mandante</label>
+                      <label className="text-[9px] font-black text-[#374151] uppercase ml-1">Mandante</label>
                       <select value={selectedHome} onChange={(e) => setSelectedHome(e.target.value)} className="w-full bg-[#f0f4f8] border-2 border-[#2b2c34] rounded-lg p-1.5 font-black text-[12px] outline-none text-[#2b2c34]">
                         <option value="">Escolher...</option>
                         {Object.keys(teams).sort().map(t => <option key={t} value={t}>{t}</option>)}
@@ -405,7 +430,7 @@ export default function App() {
                     </div>
                     <div className="text-[#ff5e3a] text-[11px] font-black italic pt-3">VS</div>
                     <div className="space-y-1">
-                      <label className="text-[9px] font-black text-[#2b2c34]/50 uppercase ml-1">Visitante</label>
+                      <label className="text-[9px] font-black text-[#374151] uppercase ml-1">Visitante</label>
                       <select value={selectedAway} onChange={(e) => setSelectedAway(e.target.value)} className="w-full bg-[#f0f4f8] border-2 border-[#2b2c34] rounded-lg p-1.5 font-black text-[12px] outline-none text-[#2b2c34]">
                         <option value="">Escolher...</option>
                         {Object.keys(teams).sort().map(t => <option key={t} value={t}>{t}</option>)}
@@ -425,8 +450,8 @@ export default function App() {
                   {[ {t: selectedHome, s: teams[selectedHome], icon: <Home className="w-3.5 h-3.5"/>}, {t: selectedAway, s: teams[selectedAway], icon: <MapPin className="w-3.5 h-3.5"/>} ].map((item, idx) => (
                     <div key={idx} className="bg-[#fffffe] p-2.5 rounded-xl border-2 border-[#2b2c34] shadow-[2px_2px_0px_#2b2c34]">
                         <div className="flex items-center gap-1.5 mb-1.5"><span className="text-[#ff5e3a]">{item.icon}</span><span className="text-[11px] font-black uppercase truncate">{item.t}</span></div>
-                        <div className="flex justify-between text-[11px] font-mono"><span className="text-[#2b2c34] font-black uppercase text-[9px]">ATQ:</span><span className="font-black text-[#ff5e3a]">{item.s?.attack.toFixed(2)}</span></div>
-                        <div className="flex justify-between text-[11px] font-mono"><span className="text-[#2b2c34] font-black uppercase text-[9px]">DEF:</span><span className={`font-black ${item.s?.defense < 0 ? 'text-[#059669]' : 'text-[#e45858]'}`}>{item.s?.defense.toFixed(2)}</span></div>
+                        <div className="flex justify-between text-[11px] font-mono"><span className="text-[#374151] font-black uppercase text-[9px]">ATQ:</span><span className="font-black text-[#ff5e3a]">{item.s?.attack.toFixed(2)}</span></div>
+                        <div className="flex justify-between text-[11px] font-mono"><span className="text-[#374151] font-black uppercase text-[9px]">DEF:</span><span className={`font-black ${item.s?.defense < 0 ? 'text-[#059669]' : 'text-[#e45858]'}`}>{item.s?.defense.toFixed(2)}</span></div>
                     </div>
                   ))}
                 </div>
@@ -437,7 +462,7 @@ export default function App() {
                     { label: selectedAway, val: simulationResult.probs.away, sub: `xG: ${simulationResult.expectedGoals.away.toFixed(2)}`, color: 'text-blue-600', odd: calcOdd(simulationResult.probs.away) }
                   ].map((item, i) => (
                     <div key={i} className="bg-[#fffffe] p-2.5 rounded-xl border-2 border-[#2b2c34] shadow-[2px_2px_0px_#2b2c34] text-center">
-                      <p className="text-[8px] font-black text-[#2b2c34] uppercase truncate mb-1.5">{item.label}</p>
+                      <p className="text-[8px] font-black text-[#374151] uppercase truncate mb-1.5">{item.label}</p>
                       <h3 className={`text-lg font-black ${item.color} leading-none`}>{item.val.toFixed(1)}%</h3>
                       <div className="mt-2.5 flex flex-col gap-1">
                         <span className="text-[8px] font-black text-[#2b2c34] bg-[#f0f4f8] py-1 rounded-full border-2 border-[#2b2c34]">ODD: {item.odd}</span>
@@ -467,10 +492,10 @@ export default function App() {
                         <div className="w-full max-w-[480px]">
                           <div className="grid grid-cols-7 gap-1">
                             <div className="col-span-1"></div>
-                            {Array.from({length: 6}).map((_, i) => <div key={i} className="text-center text-[13px] font-black text-[#2b2c34]/60">{i}</div>)}
+                            {Array.from({length: 6}).map((_, i) => <div key={i} className="text-center text-[13px] font-black text-[#374151]">{i}</div>)}
                             {simulationResult.matrix.map((row, hS) => (
                               <React.Fragment key={hS}>
-                                <div className="flex items-center justify-end pr-2 text-[13px] font-black text-[#2b2c34]/60">{hS}</div>
+                                <div className="flex items-center justify-end pr-2 text-[13px] font-black text-[#374151]">{hS}</div>
                                 {row.map((prob, aS) => {
                                   const intensity = Math.min(prob * 10, 100);
                                   return (
@@ -513,12 +538,12 @@ export default function App() {
                                       {result ? (
                                           <>
                                               <p className="text-[14px] font-black text-[#ff5e3a]">{result.probs.home.toFixed(1)}%</p>
-                                              <div className="flex flex-col text-[9px] text-[#2b2c34] font-black uppercase italic leading-tight mt-1">
+                                              <div className="flex flex-col text-[9px] text-[#374151] font-black uppercase italic leading-tight mt-1">
                                                   <span>XG: {result.expectedGoals.home.toFixed(2)}</span>
                                                   <span>ODD: {calcOdd(result.probs.home)}</span>
                                               </div>
                                           </>
-                                      ) : <p className="text-[9px] text-[#2b2c34]/50 font-black uppercase italic">Pendente</p>}
+                                      ) : <p className="text-[9px] text-[#374151]/50 font-black uppercase italic">Pendente</p>}
                                   </div>
                                   <div className="flex flex-col items-center px-1 shrink-0 z-10">
                                       {result && (
@@ -534,12 +559,12 @@ export default function App() {
                                       {result ? (
                                           <>
                                               <p className="text-[14px] font-black text-blue-600">{result.probs.away.toFixed(1)}%</p>
-                                              <div className="flex flex-col text-[9px] text-[#2b2c34] font-black uppercase italic leading-tight mt-1">
+                                              <div className="flex flex-col text-[9px] text-[#374151] font-black uppercase italic leading-tight mt-1">
                                                   <span>XG: {result.expectedGoals.away.toFixed(2)}</span>
                                                   <span>ODD: {calcOdd(result.probs.away)}</span>
                                               </div>
                                           </>
-                                      ) : <p className="text-[9px] text-[#2b2c34]/50 font-black uppercase italic text-right">Pendente</p>}
+                                      ) : <p className="text-[9px] text-[#374151]/50 font-black uppercase italic text-right">Pendente</p>}
                                   </div>
                               </div>
                           );
@@ -567,9 +592,9 @@ export default function App() {
                     <tbody className="divide-y divide-[#2b2c34]/5 text-[11px] font-black text-[#2b2c34]">
                       {leagueTable.map((row, idx) => (
                         <tr key={row.name} className="hover:bg-[#ff5e3a]/5 transition-colors">
-                          <td className="px-1 py-3 text-[#2b2c34]/40 text-center text-[9px]">{idx + 1}</td>
+                          <td className="px-1 py-3 text-[#374151] text-center text-[9px]">{idx + 1}</td>
                           <td className="px-1.5 py-3 uppercase truncate max-w-[65px] leading-none">{row.name}</td>
-                          <td className="px-1 py-3 text-center font-mono bg-[#f0f4f8]/50 text-[12px]">{row.avgPoints.toFixed(1)}</td>
+                          <td className="px-1.5 py-3 text-center font-mono bg-[#f0f4f8]/50 text-[12px]">{row.avgPoints.toFixed(1)}</td>
                           <td className="px-1 py-3 text-center text-[#ff5e3a]">{row.titleProb > 0.05 ? `${row.titleProb.toFixed(1)}%` : '-'}</td>
                           <td className="px-1 py-3 text-center text-[#059669]">{row.libertaProb > 0.05 ? `${row.libertaProb.toFixed(1)}%` : '-'}</td>
                           <td className="px-1 py-3 text-center text-[#e45858]">{row.z4Prob > 0.05 ? `${row.z4Prob.toFixed(1)}%` : '-'}</td>
@@ -578,7 +603,7 @@ export default function App() {
                     </tbody>
                   </table>
                 </div>
-              ) : <div className="text-center py-16 text-[#2b2c34]/30 font-black uppercase text-[10px] border-4 border-dashed rounded-3xl">Aguardando Simulação</div>}
+              ) : <div className="text-center py-16 text-[#374151]/50 font-black uppercase text-[10px] border-4 border-dashed rounded-3xl">Aguardando Simulação</div>}
             </section>
           </div>
         )}
@@ -592,7 +617,7 @@ export default function App() {
                         <Award className="w-6 h-6 text-[#ff5e3a]" />
                     </div>
                     <div className="relative">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#2b2c34]/40" />
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#374151]" />
                         <input type="text" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="Pesquisar time..." className="w-full bg-[#fffffe] border-2 border-[#2b2c34] rounded-xl py-2 pl-10 pr-4 font-black text-[12px] outline-none text-[#2b2c34] shadow-inner" />
                     </div>
                 </div>
@@ -604,9 +629,9 @@ export default function App() {
                     <tbody className="divide-y divide-[#2b2c34]/5">
                       {powerRanking.map((team, idx) => (
                         <tr key={team.name} className="hover:bg-[#ff5e3a]/5 transition-colors">
-                          <td className="px-4 py-4 flex flex-col gap-1 min-w-0"><span className="text-[13px] font-black uppercase truncate w-full">{team.name}</span><span className="text-[8px] font-black opacity-40 italic leading-none">Rank #{idx + 1}</span></td>
+                          <td className="px-4 py-4 flex flex-col gap-1 min-w-0"><span className="text-[13px] font-black uppercase truncate w-full">{team.name}</span><span className="text-[8px] font-black text-[#374151] italic leading-none">Rank #{idx + 1}</span></td>
                           <td className="px-1 py-4 text-center leading-none"><div className={`text-[12px] font-mono font-black px-2 py-1.5 rounded-xl inline-block min-w-[45px] ${team.attack > 0 ? 'text-[#fffffe] bg-[#ff5e3a] shadow-[2px_2px_0px_#2b2c34]' : 'text-[#2b2c34] bg-[#f0f4f8] border-2 border-[#2b2c34]'}`}>{team.attack.toFixed(2)}</div></td>
-                          <td className="px-1 py-4 text-center leading-none"><div className={`text-[12px] font-mono font-black px-2 py-1.5 rounded-xl inline-block min-w-[45px] ${team.defense < 0 ? 'text-[#fffffe] bg-[#059669] shadow-[2px_2px_0px_#2b2c34]' : 'text-[#e45858] bg-[#e45858]/10 border-2 border-[#e45858]/30'}`}>{team.defense.toFixed(2)}</div></td>
+                          <td className="px-1 py-4 text-center leading-none"><div className={`text-[12px] font-mono font-black px-2 py-1.5 rounded-xl inline-block min-w-[45px] ${team.defense < 0 ? 'text-[#fffffe] bg-[#059669] shadow-[2px_2px_0px_#2b2c34]' : 'text-[#e45858] bg-[#e45858]/10 border-2 border-[#2b2c34]'}`}>{team.defense.toFixed(2)}</div></td>
                         </tr>
                       ))}
                     </tbody>
