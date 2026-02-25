@@ -377,8 +377,8 @@ export default function App() {
   if (loading) return (
     <div className="min-h-screen bg-[#f0f4f8] flex flex-col items-center justify-center text-[#2b2c34] p-4 text-center font-roboto">
       <Activity className="w-12 h-12 text-[#ff5e3a] animate-spin mb-4" />
-      <h2 className="text-xl font-black uppercase tracking-tighter leading-tight">Otimizando Grid 2D...</h2>
-      <p className="text-[#374151]/80 text-[10px] mt-4 font-mono uppercase tracking-[0.2em] font-bold">Validando 147 Modelos via RPS Histórico</p>
+      <h2 className="text-xl font-black uppercase tracking-tighter leading-tight">Simulador Brasileirão</h2>
+      <p className="text-[#374151]/80 text-[10px] mt-4 font-mono uppercase tracking-[0.2em] font-bold">Validando Modelo e Parâmetros...</p>
     </div>
   );
 
