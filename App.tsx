@@ -35,14 +35,16 @@ const SEASON_SHEET_TAB = 'Rodadas_com jogos faltantes';
 
 const SIMULATION_COUNT = 10000; 
 const LEAGUE_SIM_COUNT = 10000; 
-const EPOCHS = 100; 
+const EPOCHS = 1000; 
 const LEARNING_RATE = 0.012; 
 
-// GRID SEARCH 2D: Combinando decaimento de tempo com o peso xG ideal
+// GRID SEARCH 2D DE ALTA RESOLUÇÃO
+// Testa XI (Memória) e XG_WEIGHT (Realidade vs Justiça) simultaneamente
 const XI_CANDIDATES = [0.000, 0.0005, 0.0010, 0.0015, 0.0020, 0.0025, 0.0030]; 
-const XG_WEIGHT_CANDIDATES = [0.0, 0.2, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0];
+const XG_WEIGHT_CANDIDATES = Array.from({ length: 21 }, (_, i) => parseFloat((i * 0.05).toFixed(2))); // 0.00 a 1.00
 
 const UI_SCALE_FACTOR = 11; 
+const MAX_RATING = 3.0; 
 
 /**
  * UTILITÁRIOS ESTATÍSTICOS
@@ -83,14 +85,15 @@ const runMonteCarlo = (homeTeam, awayTeam, globalHfa, rho, iterations) => {
   const attA = (awayTeam?.attack || 0) / UI_SCALE_FACTOR;
   const defA = (awayTeam?.defense || 0) / UI_SCALE_FACTOR;
   
-  // HFA ESPECÍFICO: Soma da vantagem global e do fator caldeirão do clube
+  // HFA COMPLETO: Global da Liga + Específico do Time
   const hfa_eff = globalHfa + (homeTeam?.hfa_raw || 0);
-  
+
   const lambdaH = Math.exp(attH + defA + hfa_eff);
   const lambdaA = Math.exp(attA + defH);
-  
+
   let homeWins = 0, draws = 0, awayWins = 0;
   let scoreMatrix = Array(6).fill(0).map(() => Array(6).fill(0));
+
   for (let i = 1; i <= iterations; i++) {
     let hG = simulatePoisson(lambdaH);
     let aG = simulatePoisson(lambdaA);
@@ -102,6 +105,7 @@ const runMonteCarlo = (homeTeam, awayTeam, globalHfa, rho, iterations) => {
     scoreMatrix[cH][cA]++;
     if (hG > aG) homeWins++; else if (aG > hG) awayWins++; else draws++;
   }
+
   return {
     probs: { home: (homeWins / iterations) * 100, draw: (draws / iterations) * 100, away: (awayWins / iterations) * 100 },
     matrix: scoreMatrix.map(row => row.map(count => (count / iterations) * 100)),
@@ -129,7 +133,6 @@ export default function App() {
   const [globalParams, setGlobalParams] = useState({ hfa: 0.2, rho: 0.05, xi: 0.0019, xgWeight: 0.7 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [metrics, setMetrics] = useState({ dataCount: 0, avgGoals: 0 });
   const [selectedHome, setSelectedHome] = useState('');
   const [selectedAway, setSelectedAway] = useState('');
   const [simulationResult, setSimulationResult] = useState(null);
@@ -166,6 +169,7 @@ export default function App() {
     return foundKey ? obj[foundKey] : undefined;
   };
 
+  // Motor de Treino com suporte a Peso de xG Variável e HFA Específico
   const trainModel = (matches, xi, xgWeight) => {
     const teamStats = {};
     const allTeams = new Set([...matches.map(m => m.home), ...matches.map(m => m.away)]);
@@ -173,6 +177,7 @@ export default function App() {
     let currentHfa = 0.25, currentRho = 0.00;
     const now = new Date();
     
+    // Prepara os dados com os pesos definidos pelo Grid Search
     const weightedMatches = matches.map(m => ({
       ...m, 
       timeWeight: Math.exp(-xi * Math.max(0, (now - m.matchDate) / (1000 * 60 * 60 * 24))),
@@ -184,7 +189,7 @@ export default function App() {
       weightedMatches.forEach(match => {
         const h = teamStats[match.home], a = teamStats[match.away];
         
-        // Lambda usa a vantagem global + vantagem específica do mandante
+        // Lambda considera HFA Global + HFA Específico do time da casa
         const lambdaH = Math.exp(h.attack_raw + a.defense_raw + currentHfa + h.hfa_raw);
         const lambdaA = Math.exp(a.attack_raw + h.defense_raw);
         const errorH = match.hPond - lambdaH, errorA = match.aPond - lambdaA;
@@ -194,9 +199,9 @@ export default function App() {
         a.defense_raw += LEARNING_RATE * errorH * match.timeWeight; 
         h.defense_raw += LEARNING_RATE * errorA * match.timeWeight; 
         
-        // HFA Específico: aprende de forma moderada apenas quando o time é mandante
+        // Ajuste HFA Específico
         h.hfa_raw += (LEARNING_RATE * 0.1) * errorH * match.timeWeight;
-        // HFA Global: aprende coletivamente com todos os mandantes
+        // Ajuste HFA Global
         currentHfa += (LEARNING_RATE * 0.05) * errorH * match.timeWeight;
         
         if (match.hPond <= 1 && match.aPond <= 1) {
@@ -224,6 +229,7 @@ export default function App() {
     
     let bestXi = 0.0019, bestXgWeight = 0.7, minRps = Infinity;
     
+    // GRID SEARCH 2D DE ALTA RESOLUÇÃO (Testa todas as 147 combinações)
     XI_CANDIDATES.forEach(xi => {
       XG_WEIGHT_CANDIDATES.forEach(xgWeight => {
         const model = trainModel(trainSet, xi, xgWeight);
@@ -231,7 +237,7 @@ export default function App() {
         validationSet.forEach(m => {
             const tH = { ...model.teamStats[m.home], attack: model.teamStats[m.home].attack_raw * UI_SCALE_FACTOR, defense: model.teamStats[m.home].defense_raw * UI_SCALE_FACTOR, hfa_raw: model.teamStats[m.home].hfa_raw };
             const tA = { ...model.teamStats[m.away], attack: model.teamStats[m.away].attack_raw * UI_SCALE_FACTOR, defense: model.teamStats[m.away].defense_raw * UI_SCALE_FACTOR, hfa_raw: model.teamStats[m.away].hfa_raw };
-            const sim = runMonteCarlo(tH, tA, model.hfa, model.rho, 2000); 
+            const sim = runMonteCarlo(tH, tA, model.hfa, model.rho, 1500); 
             const outcome = m.hG > m.aG ? 'H' : (m.hG < m.aG ? 'A' : 'D');
             totalRps += calculateRPS(sim.probs, outcome);
         });
@@ -244,32 +250,29 @@ export default function App() {
       });
     });
 
+    // Treino Final com os Hiperparâmetros Vencedores
     const finalModel = trainModel(processed, bestXi, bestXgWeight);
-    const finalTeams = finalModel.teamStats, tCount = Object.keys(finalTeams).length;
-    const avgAtt = Object.values(finalTeams).reduce((s, t) => s + t.attack_raw, 0) / tCount;
-    const avgDef = Object.values(finalTeams).reduce((s, t) => s + t.defense_raw, 0) / tCount;
+    const finalTeams = finalModel.teamStats;
     
     Object.keys(finalTeams).forEach(n => {
-      const att_zeroed = finalTeams[n].attack_raw - avgAtt, def_zeroed = finalTeams[n].defense_raw - avgDef;
+      const att_zeroed = finalTeams[n].attack_raw - (Object.values(finalTeams).reduce((s, t) => s + t.attack_raw, 0) / Object.keys(finalTeams).length);
+      const def_zeroed = finalTeams[n].defense_raw - (Object.values(finalTeams).reduce((s, t) => s + t.defense_raw, 0) / Object.keys(finalTeams).length);
+      
       finalTeams[n].attack = att_zeroed * UI_SCALE_FACTOR;
       finalTeams[n].defense = def_zeroed * UI_SCALE_FACTOR;
-      finalTeams[n].hfa_raw = finalTeams[n].hfa_raw; // HFA puro logarítmico preservado
-      // Escala visual do Fator Casa Específico para exibição (Base + Fator da Equipa)
+      finalTeams[n].hfa_raw = finalTeams[n].hfa_raw; 
+      // HFA Scaled para exibição no ranking (Global + Específico)
       finalTeams[n].hfa_scaled = (finalModel.hfa + finalTeams[n].hfa_raw) * UI_SCALE_FACTOR; 
     });
     
     setTeams(finalTeams);
     setGlobalParams({ hfa: finalModel.hfa, rho: finalModel.rho, xi: bestXi, xgWeight: bestXgWeight });
-    setMetrics({ dataCount: processed.length });
   };
 
   const processLeagueSchedule = (matches) => {
     const schedule = matches.map(m => ({
-      round: getInsensitive(m, 'rodada'),
-      home: getInsensitive(m, 'home'),
-      away: getInsensitive(m, 'away'),
-      hGoals: getInsensitive(m, 'hgoals'),
-      aGoals: getInsensitive(m, 'agoals'),
+      round: getInsensitive(m, 'rodada'), home: getInsensitive(m, 'home'), away: getInsensitive(m, 'away'),
+      hGoals: getInsensitive(m, 'hgoals'), aGoals: getInsensitive(m, 'agoals'),
       played: getInsensitive(m, 'hgoals') !== null && getInsensitive(m, 'hgoals') !== undefined && String(getInsensitive(m, 'hgoals')).trim() !== ''
     })).filter(m => m.home && m.away);
     setLeagueSchedule(schedule);
@@ -289,7 +292,7 @@ export default function App() {
       const leagueCsv = await leagueRes.text();
       processLeagueSchedule(parseCSV(leagueCsv));
       setLoading(false);
-    } catch (err) { setError("Erro ao carregar dados."); setLoading(false); }
+    } catch (err) { setError("Erro de conexão."); setLoading(false); }
   }, []);
 
   useEffect(() => { fetchAllData(); }, [fetchAllData]);
@@ -373,9 +376,9 @@ export default function App() {
 
   if (loading) return (
     <div className="min-h-screen bg-[#f0f4f8] flex flex-col items-center justify-center text-[#2b2c34] p-4 text-center font-roboto">
-      <Activity className="w-10 h-10 text-[#ff5e3a] animate-pulse mb-4" />
-      <h2 className="text-lg font-black uppercase tracking-tighter leading-tight">Sincronizando Modelos...</h2>
-      <p className="text-[#374151]/80 text-[10px] mt-4 font-mono uppercase tracking-[0.2em] font-bold">Otimizando Grid 2D (XI & XG) | Backtesting Ativo</p>
+      <Activity className="w-12 h-12 text-[#ff5e3a] animate-spin mb-4" />
+      <h2 className="text-xl font-black uppercase tracking-tighter leading-tight">Otimizando Grid 2D...</h2>
+      <p className="text-[#374151]/80 text-[10px] mt-4 font-mono uppercase tracking-[0.2em] font-bold">Validando 147 Modelos via RPS Histórico</p>
     </div>
   );
 
@@ -395,10 +398,10 @@ export default function App() {
           <div className="bg-[#ff5e3a] p-1 rounded-md shadow-[2px_2px_0px_#2b2c34]"><Target className="text-[#fffffe] w-4 h-4" /></div>
           <div>
             <h1 className="text-[11px] font-black tracking-tight uppercase leading-none">Dixon-Coles Pro</h1>
-            <p className="text-[9px] font-bold text-[#ff8906] uppercase mt-0.5 italic flex items-center gap-1.5">
-                <span>XI: {globalParams.xi.toFixed(4)}</span>
+            <p className="text-[9px] font-bold text-[#ff8906] uppercase mt-0.5 italic flex items-center gap-1">
+                <span>XI:{globalParams.xi.toFixed(4)}</span>
                 <span className="opacity-40">|</span>
-                <span>WG: {(globalParams.xgWeight * 100).toFixed(0)}% XG</span>
+                <span>WG:{(globalParams.xgWeight * 100).toFixed(0)}% XG</span>
             </p>
           </div>
         </div>
@@ -414,9 +417,10 @@ export default function App() {
       </nav>
 
       <main className="max-w-3xl mx-auto p-2 space-y-4">
+        {/* TAB NAVIGATION */}
         <div className="flex flex-row gap-1 p-1 bg-[#fffffe] rounded-xl border-2 border-[#2b2c34] w-full shadow-[3px_3px_0px_#2b2c34]">
           {['match', 'round', 'league', 'ranking'].map((tab) => (
-            <button key={tab} onClick={() => setActiveTab(tab)} className={`flex-1 px-1 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-1 ${activeTab === tab ? 'bg-[#ff5e3a] text-[#fffffe]' : 'text-[#374151]'}`}>
+            <button key={tab} onClick={() => setActiveTab(tab)} className={`flex-1 px-1 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-1 ${activeTab === tab ? 'bg-[#ff5e3a] text-[#fffffe]' : 'text-[#2b2c34]/60'}`}>
               {tab === 'match' ? 'JOGO' : tab === 'round' ? 'RODADA' : tab === 'league' ? 'LIGA' : 'RANKING'}
             </button>
           ))}
@@ -458,11 +462,8 @@ export default function App() {
                         <div className="flex items-center gap-1.5 mb-1.5"><span className="text-[#ff5e3a]">{item.icon}</span><span className="text-[11px] font-black uppercase truncate">{item.t}</span></div>
                         <div className="flex justify-between text-[11px] font-mono"><span className="text-[#374151] font-black uppercase text-[9px]">ATQ:</span><span className="font-black text-[#ff5e3a]">{item.s?.attack.toFixed(2)}</span></div>
                         <div className="flex justify-between text-[11px] font-mono"><span className="text-[#374151] font-black uppercase text-[9px]">DEF:</span><span className={`font-black ${item.s?.defense < 0 ? 'text-[#059669]' : 'text-[#e45858]'}`}>{item.s?.defense.toFixed(2)}</span></div>
-                        {/* FATOR CASA ESPECÍFICO */}
-                        {item.isHome ? (
+                        {item.isHome && (
                            <div className="flex justify-between text-[11px] font-mono mt-0.5"><span className="text-[#374151] font-black uppercase text-[9px]">CASA:</span><span className="font-black text-[#ff8906]">+{item.s?.hfa_scaled.toFixed(2)}</span></div>
-                        ) : (
-                           <div className="flex justify-between text-[11px] font-mono mt-0.5 invisible"><span className="text-[#374151] font-black uppercase text-[9px]">CASA:</span><span className="font-black">0.00</span></div>
                         )}
                     </div>
                   ))}
@@ -478,7 +479,7 @@ export default function App() {
                       <h3 className={`text-lg font-black ${item.color} leading-none`}>{item.val.toFixed(1)}%</h3>
                       <div className="mt-2.5 flex flex-col gap-1">
                         <span className="text-[8px] font-black text-[#2b2c34] bg-[#f0f4f8] py-1 rounded-full border-2 border-[#2b2c34]">ODD: {item.odd}</span>
-                        {item.sub && <span className="text-[8px] font-black text-[#2b2c34] uppercase italic bg-[#ff8906]/15 px-1 py-0.5 rounded leading-none">{item.sub}</span>}
+                        {item.sub && <span className="text-[8px] font-black text-[#2b2c34] uppercase italic bg-[#ff8906]/15 px-1 py-0.5 rounded leading-none"> {item.sub}</span>}
                       </div>
                     </div>
                   ))}
@@ -615,7 +616,7 @@ export default function App() {
                     </tbody>
                   </table>
                 </div>
-              ) : <div className="text-center py-16 text-[#374151]/50 font-black uppercase text-[10px] border-4 border-dashed rounded-3xl">Aguardando Simulação</div>}
+              ) : <div className="text-center py-16 text-[#374151]/50 font-black uppercase text-[10px] border-4 border-dashed rounded-3xl">Simulação pendente</div>}
             </section>
           </div>
         )}
@@ -636,33 +637,19 @@ export default function App() {
                 <div className="overflow-x-hidden">
                   <table className="w-full text-left border-collapse table-fixed">
                     <thead className="bg-[#f0f4f8] text-[8px] font-black text-[#2b2c34] uppercase border-b-2 border-[#2b2c34]">
-                        <tr>
-                            <th className="px-3 py-3.5 w-[34%]">Equipe</th>
-                            <th className="px-1 py-3.5 text-center w-[22%]">Atq</th>
-                            <th className="px-1 py-3.5 text-center w-[22%]">Def</th>
-                            <th className="px-1 py-3.5 text-center w-[22%] flex justify-center items-center gap-1"><Home className="w-2.5 h-2.5"/> Casa</th>
-                        </tr>
+                        <tr><th className="px-3 py-3.5 w-[34%]">Equipe</th><th className="px-1 py-3.5 text-center w-[22%]">Atq</th><th className="px-1 py-3.5 text-center w-[22%]">Def</th><th className="px-1 py-3.5 text-center w-[22%]">Casa</th></tr>
                     </thead>
                     <tbody className="divide-y divide-[#2b2c34]/5">
                       {powerRanking.map((team, idx) => (
                         <tr key={team.name} className="hover:bg-[#ff5e3a]/5 transition-colors">
-                          <td className="px-3 py-3.5 flex flex-col gap-1 min-w-0"><span className="text-[12px] font-black uppercase truncate w-full">{team.name}</span><span className="text-[7.5px] font-black text-[#374151] italic leading-none">Rank #{idx + 1}</span></td>
-                          <td className="px-1 py-3.5 text-center leading-none"><div className={`text-[11px] font-mono font-black px-1.5 py-1.5 rounded-xl inline-block min-w-[38px] ${team.attack > 0 ? 'text-[#fffffe] bg-[#ff5e3a] shadow-[2px_2px_0px_#2b2c34]' : 'text-[#2b2c34] bg-[#f0f4f8] border-2 border-[#2b2c34]'}`}>{team.attack.toFixed(2)}</div></td>
-                          <td className="px-1 py-3.5 text-center leading-none"><div className={`text-[11px] font-mono font-black px-1.5 py-1.5 rounded-xl inline-block min-w-[38px] ${team.defense < 0 ? 'text-[#fffffe] bg-[#059669] shadow-[2px_2px_0px_#2b2c34]' : 'text-[#e45858] bg-[#e45858]/10 border-2 border-[#2b2c34]'}`}>{team.defense.toFixed(2)}</div></td>
-                          <td className="px-1 py-3.5 text-center leading-none"><div className={`text-[11px] font-mono font-black px-1.5 py-1.5 rounded-xl inline-block min-w-[38px] text-[#2b2c34] bg-[#f0f4f8] border-2 border-[#2b2c34]`}>+{team.hfa_scaled?.toFixed(2)}</div></td>
+                          <td className="px-3 py-3.5 flex flex-col gap-1 min-w-0"><span className="text-[13px] font-black uppercase truncate w-full">{team.name}</span><span className="text-[8px] font-black text-[#374151] italic leading-none">Rank #{idx + 1}</span></td>
+                          <td className="px-1 py-3.5 text-center leading-none"><div className={`text-[12px] font-mono font-black px-2 py-1.5 rounded-xl inline-block min-w-[38px] ${team.attack > 0 ? 'text-[#fffffe] bg-[#ff5e3a] shadow-[2px_2px_0px_#2b2c34]' : 'text-[#2b2c34] bg-[#f0f4f8] border-2 border-[#2b2c34]'}`}>{team.attack.toFixed(2)}</div></td>
+                          <td className="px-1 py-3.5 text-center leading-none"><div className={`text-[12px] font-mono font-black px-2 py-1.5 rounded-xl inline-block min-w-[38px] ${team.defense < 0 ? 'text-[#fffffe] bg-[#059669] shadow-[2px_2px_0px_#2b2c34]' : 'text-[#e45858] bg-[#e45858]/10 border-2 border-[#2b2c34]'}`}>{team.defense.toFixed(2)}</div></td>
+                          <td className="px-1 py-3.5 text-center leading-none"><div className={`text-[12px] font-mono font-black px-2 py-1.5 rounded-xl inline-block min-w-[38px] text-[#2b2c34] bg-[#f0f4f8] border-2 border-[#2b2c34]`}>+{team.hfa_scaled?.toFixed(2)}</div></td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
-                </div>
-                <div className="p-5 bg-[#fffffe] text-[#2b2c34] relative text-center sm:text-left border-t-2 border-[#2b2c34]">
-                   <div className="flex items-center gap-3">
-                      <Shield className="w-8 h-8 text-blue-600 shrink-0" />
-                      <div className="text-left">
-                          <p className="text-[10px] font-black text-blue-600 uppercase tracking-widest leading-none mb-1">Métricas</p>
-                          <p className="text-[8px] text-[#374151] font-bold leading-relaxed uppercase">Ataque (+) volume. Defesa (-) solidez. Casa (+) força de mando.</p>
-                      </div>
-                   </div>
                 </div>
              </section>
           </div>
