@@ -82,9 +82,13 @@ const runMonteCarlo = (homeTeam, awayTeam, globalHfa, rho, iterations) => {
   const defH = (homeTeam?.defense || 0) / UI_SCALE_FACTOR;
   const attA = (awayTeam?.attack || 0) / UI_SCALE_FACTOR;
   const defA = (awayTeam?.defense || 0) / UI_SCALE_FACTOR;
-  const hfa_eff = ((globalHfa + (homeTeam?.hfa_raw || 0)) / 2);
+  
+  // HFA ESPECÍFICO: Soma da vantagem global e do fator caldeirão do clube
+  const hfa_eff = globalHfa + (homeTeam?.hfa_raw || 0);
+  
   const lambdaH = Math.exp(attH + defA + hfa_eff);
   const lambdaA = Math.exp(attA + defH);
+  
   let homeWins = 0, draws = 0, awayWins = 0;
   let scoreMatrix = Array(6).fill(0).map(() => Array(6).fill(0));
   for (let i = 1; i <= iterations; i++) {
@@ -110,7 +114,7 @@ const runMonteCarlo = (homeTeam, awayTeam, globalHfa, rho, iterations) => {
 const simulateMatchResult = (homeTeam, awayTeam, globalHfa, rho) => {
   const attH = (homeTeam?.attack || 0) / UI_SCALE_FACTOR, defH = (homeTeam?.defense || 0) / UI_SCALE_FACTOR;
   const attA = (awayTeam?.attack || 0) / UI_SCALE_FACTOR, defA = (awayTeam?.defense || 0) / UI_SCALE_FACTOR;
-  const hfa_eff = ((globalHfa + (homeTeam?.hfa_raw || 0)) / 2);
+  const hfa_eff = globalHfa + (homeTeam?.hfa_raw || 0);
   const lambdaH = Math.exp(attH + defA + hfa_eff), lambdaA = Math.exp(attA + defH);
   let hG = simulatePoisson(lambdaH), aG = simulatePoisson(lambdaA);
   if (hG <= 1 && aG <= 1) {
@@ -162,7 +166,6 @@ export default function App() {
     return foundKey ? obj[foundKey] : undefined;
   };
 
-  // Motor atualizado para receber o xgWeight na função
   const trainModel = (matches, xi, xgWeight) => {
     const teamStats = {};
     const allTeams = new Set([...matches.map(m => m.home), ...matches.map(m => m.away)]);
@@ -170,7 +173,6 @@ export default function App() {
     let currentHfa = 0.25, currentRho = 0.00;
     const now = new Date();
     
-    // Aplica na matriz de treino tanto a Recência (XI) quanto a Proporção Realidade/Justiça (XG_WEIGHT)
     const weightedMatches = matches.map(m => ({
       ...m, 
       timeWeight: Math.exp(-xi * Math.max(0, (now - m.matchDate) / (1000 * 60 * 60 * 24))),
@@ -181,7 +183,9 @@ export default function App() {
     for (let e = 0; e < EPOCHS; e++) {
       weightedMatches.forEach(match => {
         const h = teamStats[match.home], a = teamStats[match.away];
-        const lambdaH = Math.exp(h.attack_raw + a.defense_raw + (currentHfa + h.hfa_raw)/2);
+        
+        // Lambda usa a vantagem global + vantagem específica do mandante
+        const lambdaH = Math.exp(h.attack_raw + a.defense_raw + currentHfa + h.hfa_raw);
         const lambdaA = Math.exp(a.attack_raw + h.defense_raw);
         const errorH = match.hPond - lambdaH, errorA = match.aPond - lambdaA;
         
@@ -189,7 +193,10 @@ export default function App() {
         a.attack_raw += LEARNING_RATE * errorA * match.timeWeight;
         a.defense_raw += LEARNING_RATE * errorH * match.timeWeight; 
         h.defense_raw += LEARNING_RATE * errorA * match.timeWeight; 
-        h.hfa_raw += (LEARNING_RATE * 0.2) * errorH * match.timeWeight;
+        
+        // HFA Específico: aprende de forma moderada apenas quando o time é mandante
+        h.hfa_raw += (LEARNING_RATE * 0.1) * errorH * match.timeWeight;
+        // HFA Global: aprende coletivamente com todos os mandantes
         currentHfa += (LEARNING_RATE * 0.05) * errorH * match.timeWeight;
         
         if (match.hPond <= 1 && match.aPond <= 1) {
@@ -207,7 +214,6 @@ export default function App() {
       const hG = getInsensitive(m, 'hgoals') || 0, aG = getInsensitive(m, 'agoals') || 0;
       const hxG = getInsensitive(m, 'hxg') || hG, axG = getInsensitive(m, 'axg') || aG;
       const matchDate = new Date(getInsensitive(m, 'data'));
-      // Agora hPond/aPond são calculados dinamicamente no trainModel
       return { home, away, matchDate, hG, aG, hxG, axG };
     }).filter(m => m.home && m.away && !isNaN(m.matchDate));
     
@@ -218,14 +224,13 @@ export default function App() {
     
     let bestXi = 0.0019, bestXgWeight = 0.7, minRps = Infinity;
     
-    // Grid Search 2D
     XI_CANDIDATES.forEach(xi => {
       XG_WEIGHT_CANDIDATES.forEach(xgWeight => {
         const model = trainModel(trainSet, xi, xgWeight);
         let totalRps = 0;
         validationSet.forEach(m => {
-            const tH = { ...model.teamStats[m.home], attack: model.teamStats[m.home].attack_raw * UI_SCALE_FACTOR, defense: model.teamStats[m.home].defense_raw * UI_SCALE_FACTOR };
-            const tA = { ...model.teamStats[m.away], attack: model.teamStats[m.away].attack_raw * UI_SCALE_FACTOR, defense: model.teamStats[m.away].defense_raw * UI_SCALE_FACTOR };
+            const tH = { ...model.teamStats[m.home], attack: model.teamStats[m.home].attack_raw * UI_SCALE_FACTOR, defense: model.teamStats[m.home].defense_raw * UI_SCALE_FACTOR, hfa_raw: model.teamStats[m.home].hfa_raw };
+            const tA = { ...model.teamStats[m.away], attack: model.teamStats[m.away].attack_raw * UI_SCALE_FACTOR, defense: model.teamStats[m.away].defense_raw * UI_SCALE_FACTOR, hfa_raw: model.teamStats[m.away].hfa_raw };
             const sim = runMonteCarlo(tH, tA, model.hfa, model.rho, 2000); 
             const outcome = m.hG > m.aG ? 'H' : (m.hG < m.aG ? 'A' : 'D');
             totalRps += calculateRPS(sim.probs, outcome);
@@ -239,7 +244,6 @@ export default function App() {
       });
     });
 
-    // Treina o modelo definitivo usando a combinação de ouro
     const finalModel = trainModel(processed, bestXi, bestXgWeight);
     const finalTeams = finalModel.teamStats, tCount = Object.keys(finalTeams).length;
     const avgAtt = Object.values(finalTeams).reduce((s, t) => s + t.attack_raw, 0) / tCount;
@@ -249,7 +253,9 @@ export default function App() {
       const att_zeroed = finalTeams[n].attack_raw - avgAtt, def_zeroed = finalTeams[n].defense_raw - avgDef;
       finalTeams[n].attack = att_zeroed * UI_SCALE_FACTOR;
       finalTeams[n].defense = def_zeroed * UI_SCALE_FACTOR;
-      finalTeams[n].hfa_raw = finalTeams[n].hfa_raw;
+      finalTeams[n].hfa_raw = finalTeams[n].hfa_raw; // HFA puro logarítmico preservado
+      // Escala visual do Fator Casa Específico para exibição (Base + Fator da Equipa)
+      finalTeams[n].hfa_scaled = (finalModel.hfa + finalTeams[n].hfa_raw) * UI_SCALE_FACTOR; 
     });
     
     setTeams(finalTeams);
@@ -447,11 +453,17 @@ export default function App() {
             {simulationResult && (
               <div className="space-y-4 animate-in">
                 <div className="grid grid-cols-2 gap-2">
-                  {[ {t: selectedHome, s: teams[selectedHome], icon: <Home className="w-3.5 h-3.5"/>}, {t: selectedAway, s: teams[selectedAway], icon: <MapPin className="w-3.5 h-3.5"/>} ].map((item, idx) => (
+                  {[ {t: selectedHome, s: teams[selectedHome], icon: <Home className="w-3.5 h-3.5"/>, isHome: true}, {t: selectedAway, s: teams[selectedAway], icon: <MapPin className="w-3.5 h-3.5"/>, isHome: false} ].map((item, idx) => (
                     <div key={idx} className="bg-[#fffffe] p-2.5 rounded-xl border-2 border-[#2b2c34] shadow-[2px_2px_0px_#2b2c34]">
                         <div className="flex items-center gap-1.5 mb-1.5"><span className="text-[#ff5e3a]">{item.icon}</span><span className="text-[11px] font-black uppercase truncate">{item.t}</span></div>
                         <div className="flex justify-between text-[11px] font-mono"><span className="text-[#374151] font-black uppercase text-[9px]">ATQ:</span><span className="font-black text-[#ff5e3a]">{item.s?.attack.toFixed(2)}</span></div>
                         <div className="flex justify-between text-[11px] font-mono"><span className="text-[#374151] font-black uppercase text-[9px]">DEF:</span><span className={`font-black ${item.s?.defense < 0 ? 'text-[#059669]' : 'text-[#e45858]'}`}>{item.s?.defense.toFixed(2)}</span></div>
+                        {/* FATOR CASA ESPECÍFICO */}
+                        {item.isHome ? (
+                           <div className="flex justify-between text-[11px] font-mono mt-0.5"><span className="text-[#374151] font-black uppercase text-[9px]">CASA:</span><span className="font-black text-[#ff8906]">+{item.s?.hfa_scaled.toFixed(2)}</span></div>
+                        ) : (
+                           <div className="flex justify-between text-[11px] font-mono mt-0.5 invisible"><span className="text-[#374151] font-black uppercase text-[9px]">CASA:</span><span className="font-black">0.00</span></div>
+                        )}
                     </div>
                   ))}
                 </div>
@@ -623,19 +635,34 @@ export default function App() {
                 </div>
                 <div className="overflow-x-hidden">
                   <table className="w-full text-left border-collapse table-fixed">
-                    <thead className="bg-[#f0f4f8] text-[9px] font-black text-[#2b2c34] uppercase border-b-2 border-[#2b2c34]">
-                        <tr><th className="px-4 py-4 w-[45%]">Equipe</th><th className="px-1 py-4 text-center w-[27.5%]">Atq</th><th className="px-1 py-4 text-center w-[27.5%]">Def</th></tr>
+                    <thead className="bg-[#f0f4f8] text-[8px] font-black text-[#2b2c34] uppercase border-b-2 border-[#2b2c34]">
+                        <tr>
+                            <th className="px-3 py-3.5 w-[34%]">Equipe</th>
+                            <th className="px-1 py-3.5 text-center w-[22%]">Atq</th>
+                            <th className="px-1 py-3.5 text-center w-[22%]">Def</th>
+                            <th className="px-1 py-3.5 text-center w-[22%] flex justify-center items-center gap-1"><Home className="w-2.5 h-2.5"/> Casa</th>
+                        </tr>
                     </thead>
                     <tbody className="divide-y divide-[#2b2c34]/5">
                       {powerRanking.map((team, idx) => (
                         <tr key={team.name} className="hover:bg-[#ff5e3a]/5 transition-colors">
-                          <td className="px-4 py-4 flex flex-col gap-1 min-w-0"><span className="text-[13px] font-black uppercase truncate w-full">{team.name}</span><span className="text-[8px] font-black text-[#374151] italic leading-none">Rank #{idx + 1}</span></td>
-                          <td className="px-1 py-4 text-center leading-none"><div className={`text-[12px] font-mono font-black px-2 py-1.5 rounded-xl inline-block min-w-[45px] ${team.attack > 0 ? 'text-[#fffffe] bg-[#ff5e3a] shadow-[2px_2px_0px_#2b2c34]' : 'text-[#2b2c34] bg-[#f0f4f8] border-2 border-[#2b2c34]'}`}>{team.attack.toFixed(2)}</div></td>
-                          <td className="px-1 py-4 text-center leading-none"><div className={`text-[12px] font-mono font-black px-2 py-1.5 rounded-xl inline-block min-w-[45px] ${team.defense < 0 ? 'text-[#fffffe] bg-[#059669] shadow-[2px_2px_0px_#2b2c34]' : 'text-[#e45858] bg-[#e45858]/10 border-2 border-[#2b2c34]'}`}>{team.defense.toFixed(2)}</div></td>
+                          <td className="px-3 py-3.5 flex flex-col gap-1 min-w-0"><span className="text-[12px] font-black uppercase truncate w-full">{team.name}</span><span className="text-[7.5px] font-black text-[#374151] italic leading-none">Rank #{idx + 1}</span></td>
+                          <td className="px-1 py-3.5 text-center leading-none"><div className={`text-[11px] font-mono font-black px-1.5 py-1.5 rounded-xl inline-block min-w-[38px] ${team.attack > 0 ? 'text-[#fffffe] bg-[#ff5e3a] shadow-[2px_2px_0px_#2b2c34]' : 'text-[#2b2c34] bg-[#f0f4f8] border-2 border-[#2b2c34]'}`}>{team.attack.toFixed(2)}</div></td>
+                          <td className="px-1 py-3.5 text-center leading-none"><div className={`text-[11px] font-mono font-black px-1.5 py-1.5 rounded-xl inline-block min-w-[38px] ${team.defense < 0 ? 'text-[#fffffe] bg-[#059669] shadow-[2px_2px_0px_#2b2c34]' : 'text-[#e45858] bg-[#e45858]/10 border-2 border-[#2b2c34]'}`}>{team.defense.toFixed(2)}</div></td>
+                          <td className="px-1 py-3.5 text-center leading-none"><div className={`text-[11px] font-mono font-black px-1.5 py-1.5 rounded-xl inline-block min-w-[38px] text-[#2b2c34] bg-[#f0f4f8] border-2 border-[#2b2c34]`}>+{team.hfa_scaled?.toFixed(2)}</div></td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
+                </div>
+                <div className="p-5 bg-[#fffffe] text-[#2b2c34] relative text-center sm:text-left border-t-2 border-[#2b2c34]">
+                   <div className="flex items-center gap-3">
+                      <Shield className="w-8 h-8 text-blue-600 shrink-0" />
+                      <div className="text-left">
+                          <p className="text-[10px] font-black text-blue-600 uppercase tracking-widest leading-none mb-1">Métricas</p>
+                          <p className="text-[8px] text-[#374151] font-bold leading-relaxed uppercase">Ataque (+) volume. Defesa (-) solidez. Casa (+) força de mando.</p>
+                      </div>
+                   </div>
                 </div>
              </section>
           </div>
